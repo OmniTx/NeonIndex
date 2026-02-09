@@ -1,0 +1,24 @@
+# NeonIndex - Git Ignore File
+
+# Environment files (NEVER commit these!)
+.env
+
+# Uploaded files (optional - exclude if sensitive)
+# uploads/
+
+# Comments data
+comments.json
+
+# System files
+.DS_Store
+Thumbs.db
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# PHP session files
+sess_*

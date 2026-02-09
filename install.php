@@ -33,7 +33,7 @@ function downloadFile($url, $destination)
 {
     $fp = fopen($destination, 'w+');
     if (!$fp)
-        return false;
+        return 'Could not create file';
 
     $ch = curl_init(str_replace(' ', '%20', $url));
     curl_setopt($ch, CURLOPT_TIMEOUT, 300);
@@ -43,10 +43,17 @@ function downloadFile($url, $destination)
 
     $success = curl_exec($ch);
     $error = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
     fclose($fp);
 
-    return $success ? true : $error;
+    if (!$success) {
+        return $error ?: 'Download failed';
+    }
+    if ($httpCode !== 200) {
+        return "GitHub returned HTTP $httpCode - Repository or branch not found";
+    }
+    return true;
 }
 
 function recursiveCopy($src, $dst)

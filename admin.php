@@ -89,6 +89,7 @@ $config['SHOW_COMMENTS'] = $config['SHOW_COMMENTS'] ?? 'true';
 
 // Rate limiting & upload settings
 $config['MAX_UPLOAD_SIZE'] = $config['MAX_UPLOAD_SIZE'] ?? '10';
+$config['CHUNK_SIZE_MB'] = $config['CHUNK_SIZE_MB'] ?? '8';
 $config['RATE_LIMIT_UPLOADS'] = $config['RATE_LIMIT_UPLOADS'] ?? '20';
 $config['RATE_LIMIT_COMMENTS'] = $config['RATE_LIMIT_COMMENTS'] ?? '10';
 $config['ENABLE_DOWNLOAD_LOG'] = $config['ENABLE_DOWNLOAD_LOG'] ?? 'false';
@@ -274,6 +275,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
 
     // Rate limiting & upload settings
     $config['MAX_UPLOAD_SIZE'] = $_POST['max_upload_size'] ?? $config['MAX_UPLOAD_SIZE'];
+    $config['CHUNK_SIZE_MB'] = $_POST['chunk_size_mb'] ?? $config['CHUNK_SIZE_MB'];
     $config['RATE_LIMIT_UPLOADS'] = $_POST['rate_limit_uploads'] ?? $config['RATE_LIMIT_UPLOADS'];
     $config['RATE_LIMIT_COMMENTS'] = $_POST['rate_limit_comments'] ?? $config['RATE_LIMIT_COMMENTS'];
     $config['ENABLE_DOWNLOAD_LOG'] = isset($_POST['enable_download_log']) ? 'true' : 'false';
@@ -714,6 +716,12 @@ $comments = isAuthenticated() ? getComments() : [];
                                             <input type="number" name="max_upload_size" class="form-control" 
                                                    value="<?= htmlspecialchars($config['MAX_UPLOAD_SIZE']) ?>" min="0">
                                             <small class="text-muted">Set to 0 for unlimited</small>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Chunk Size (MB)</label>
+                                            <input type="number" name="chunk_size_mb" class="form-control" 
+                                                   value="<?= htmlspecialchars($config['CHUNK_SIZE_MB']) ?>" min="1" max="50">
+                                            <small class="text-muted">Size of chunks for large file uploads (1-50 MB)</small>
                                         </div>
                                         <div class="row">
                                             <div class="col-6 mb-3">

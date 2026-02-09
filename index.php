@@ -78,6 +78,7 @@ define('COMMENTS_FILE', __DIR__ . '/comments.json');
 
 // Upload & Rate Limiting Settings
 define('MAX_UPLOAD_SIZE', (int) ($config['MAX_UPLOAD_SIZE'] ?? 10));  // MB
+define('CHUNK_SIZE_MB', (int) ($config['CHUNK_SIZE_MB'] ?? 8));  // MB for chunked uploads
 define('RATE_LIMIT_UPLOADS', (int) ($config['RATE_LIMIT_UPLOADS'] ?? 20));  // per hour
 define('RATE_LIMIT_COMMENTS', (int) ($config['RATE_LIMIT_COMMENTS'] ?? 10));  // per hour
 define('ENABLE_DOWNLOAD_LOG', ($config['ENABLE_DOWNLOAD_LOG'] ?? 'false') === 'true');
@@ -290,6 +291,28 @@ function isHiddenFile(string $filename): bool
 }
 
 /**
+ * Recursively delete a directory and all its contents
+ */
+function deleteRecursive(string $path): bool
+{
+    if (is_file($path)) {
+        return @unlink($path);
+    }
+    if (is_dir($path)) {
+        $items = scandir($path);
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..')
+                continue;
+            if (!deleteRecursive($path . DIRECTORY_SEPARATOR . $item)) {
+                return false;
+            }
+        }
+        return @rmdir($path);
+    }
+    return false;
+}
+
+/**
  * Verify CSRF token
  */
 function verifyCSRF(): bool
@@ -425,6 +448,10 @@ if (($_GET['action'] ?? '') === 'download' && isset($_GET['file'])) {
 if (($_GET['action'] ?? '') === 'download_folder' && isset($_GET['folder'])) {
     $folderPath = sanitizePath($_GET['folder']);
     if ($folderPath && is_dir($folderPath) && class_exists('ZipArchive')) {
+        // Increase limits for large folders
+        @set_time_limit(0);
+        @ini_set('memory_limit', '512M');
+
         $zipName = basename($folderPath) . '.zip';
         $tempZip = tempnam(sys_get_temp_dir(), 'zip_');
 
@@ -447,7 +474,18 @@ if (($_GET['action'] ?? '') === 'download_folder' && isset($_GET['folder'])) {
             header('Content-Type: application/zip');
             header('Content-Disposition: attachment; filename="' . $zipName . '"');
             header('Content-Length: ' . filesize($tempZip));
-            readfile($tempZip);
+            header('Content-Transfer-Encoding: binary');
+            header('Cache-Control: no-cache, must-revalidate');
+
+            // Stream ZIP file in chunks to avoid memory issues
+            $handle = fopen($tempZip, 'rb');
+            if ($handle) {
+                while (!feof($handle) && !connection_aborted()) {
+                    echo fread($handle, 8192);
+                    flush();
+                }
+                fclose($handle);
+            }
             unlink($tempZip);
             exit;
         }
@@ -459,7 +497,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     if (verifyCSRF() && isset($_POST['file'])) {
         $filePath = sanitizePath($_POST['file']);
         if ($filePath && $filePath !== BASE_DIR) {
-            if (is_dir($filePath) ? @rmdir($filePath) : @unlink($filePath)) {
+            // Use recursive delete for directories (supports non-empty folders)
+            if (deleteRecursive($filePath)) {
                 $message = 'Deleted successfully!';
                 $messageType = 'success';
             } else {
@@ -811,6 +850,13 @@ if (file_exists($readmeFile)) {
 
         .file-icon {
             width: 20px;
+        }
+
+        /* Modal backdrop blur effect */
+        .modal-backdrop {
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            background-color: rgba(0, 0, 0, 0.4);
         }
     </style>
 </head>
@@ -1184,7 +1230,7 @@ if (file_exists($readmeFile)) {
                 const overallStatus = document.getElementById('uploadOverallStatus');
                 const resultAlert = document.getElementById('uploadResultAlert');
 
-                const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB chunks for faster uploads
+                const CHUNK_SIZE = <?= CHUNK_SIZE_MB ?> * 1024 * 1024; // Configurable chunk size
                 const CSRF_TOKEN = '<?= $_SESSION['csrf_token'] ?>';
                 const CURRENT_DIR = '<?= htmlspecialchars($relativePath) ?>';
 
@@ -1209,7 +1255,7 @@ if (file_exists($readmeFile)) {
                 dropZone.addEventListener('drop', async (e) => {
                     e.preventDefault();
                     dropZone.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
-                    
+
                     // Use DataTransferItemList for folder support
                     const items = e.dataTransfer.items;
                     if (items && items.length) {
@@ -1221,7 +1267,7 @@ if (file_exists($readmeFile)) {
                 // Recursively get all files from dropped items (supports folders)
                 async function getAllFilesFromDrop(items) {
                     const files = [];
-                    
+
                     async function traverseEntry(entry, path = '') {
                         if (entry.isFile) {
                             return new Promise(resolve => {
@@ -1247,14 +1293,14 @@ if (file_exists($readmeFile)) {
                             });
                         }
                     }
-                    
+
                     for (let i = 0; i < items.length; i++) {
                         const entry = items[i].webkitGetAsEntry();
                         if (entry) {
                             await traverseEntry(entry);
                         }
                     }
-                    
+
                     return files;
                 }
 

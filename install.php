@@ -78,35 +78,36 @@ function recursiveDelete($dir)
 
 // Handle Installation
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'install') {
-    // Verify CSRF token
-    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', $_POST['csrf_token'])) {
-        $_SESSION['logs'][] = ['msg' => 'Invalid security token. Please refresh and try again.', 'type' => 'danger'];
+    clearLogs();
+    $repo = preg_replace('/[^a-zA-Z0-9\-_\/]/', '', $_POST['repo'] ?? DEFAULT_REPO);
+    $branch = preg_replace('/[^a-zA-Z0-9\-_]/', '', $_POST['branch'] ?? DEFAULT_BRANCH);
+
+    // 1. Check Requirements
+    if (!extension_loaded('zip')) {
+        logMessage('ZIP extension is missing!', 'danger');
+    } elseif (!extension_loaded('curl')) {
+        logMessage('CURL extension is missing!', 'danger');
+    } elseif (!is_writable(INSTALL_DIR)) {
+        logMessage('Current directory is not writable!', 'danger');
     } else {
-        clearLogs();
-        $repo = preg_replace('/[^a-zA-Z0-9\-_\/]/', '', $_POST['repo'] ?? DEFAULT_REPO);
-        $branch = preg_replace('/[^a-zA-Z0-9\-_]/', '', $_POST['branch'] ?? DEFAULT_BRANCH);
+        // 2. Download Zip
+        $zipUrl = "https://github.com/{$repo}/archive/refs/heads/{$branch}.zip";
+        $zipFile = INSTALL_DIR . '/neonindex.zip';
 
-        // 1. Check Requirements
-        if (!extension_loaded('zip')) {
-            logMessage('ZIP extension is missing!', 'danger');
-        } elseif (!extension_loaded('curl')) {
-            logMessage('CURL extension is missing!', 'danger');
-        } elseif (!is_writable(INSTALL_DIR)) {
-            logMessage('Current directory is not writable!', 'danger');
-        } else {
-            // 2. Download Zip
-            $zipUrl = "https://github.com/{$repo}/archive/refs/heads/{$branch}.zip";
-            $zipFile = INSTALL_DIR . '/neonindex.zip';
+        logMessage("Downloading from {$zipUrl}...", 'info');
+        $download = downloadFile($zipUrl, $zipFile);
 
-            logMessage("Downloading from {$zipUrl}...", 'info');
-            $download = downloadFile($zipUrl, $zipFile);
+        if ($download === true) {
+            logMessage('Download successful!', 'success');
 
-            if ($download === true) {
-                logMessage('Download successful!', 'success');
-
+            // Check if file is valid
+            if (!file_exists($zipFile) || filesize($zipFile) < 1000) {
+                logMessage('Downloaded file is invalid or too small. GitHub may have returned an error page.', 'danger');
+            } else {
                 // 3. Extract Zip
                 $zip = new ZipArchive;
-                if ($zip->open($zipFile) === TRUE) {
+                $openResult = $zip->open($zipFile);
+                if ($openResult === TRUE) {
                     // Get the name of the root folder in the zip
                     $rootFolder = $zip->getNameIndex(0);
                     $zip->extractTo(INSTALL_DIR);
@@ -131,9 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                                 if (!is_dir($destPath))
                                     mkdir($destPath);
                             } else {
-                                // Don't overwrite existing config if possible, or maybe we should?
-                                // For installer, usually we overwrite. 
-                                // Exception: don't overwrite .env if it exists
+                                // Don't overwrite .env if it exists
                                 if ($item->getFilename() === '.env' && file_exists($destPath)) {
                                     continue;
                                 }
@@ -157,11 +156,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         logMessage('Could not find extracted folder.', 'danger');
                     }
                 } else {
-                    logMessage('Failed to extract ZIP file.', 'danger');
+                    logMessage('Failed to extract ZIP file. Error code: ' . $openResult, 'danger');
                 }
-            } else {
-                logMessage("Failed to download: " . (is_string($download) ? $download : 'Unknown error'), 'danger');
             }
+        } else {
+            logMessage("Failed to download: " . (is_string($download) ? $download : 'Unknown error'), 'danger');
         }
     }
 }

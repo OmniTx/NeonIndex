@@ -53,7 +53,7 @@ $config = loadEnv($envPath);
 
 // Default configuration values
 $config['ADMIN_PASSWORD'] = $config['ADMIN_PASSWORD'] ?? 'admin123';
-$config['HIDDEN_FILES'] = $config['HIDDEN_FILES'] ?? '.env,admin.php,.htaccess,.git,comments.json';
+$config['HIDDEN_FILES'] = $config['HIDDEN_FILES'] ?? '.env,admin.php,.htaccess,.git,comments.json,rate_limits.json,downloads.log';
 $config['SITE_TITLE'] = $config['SITE_TITLE'] ?? 'NeonIndex';
 $config['DEFAULT_THEME'] = $config['DEFAULT_THEME'] ?? 'dark';
 $config['README_POSITION'] = $config['README_POSITION'] ?? 'bottom';
@@ -64,9 +64,17 @@ $config['SHOW_UPLOAD'] = $config['SHOW_UPLOAD'] ?? 'true';
 $config['SHOW_THEME_TOGGLE'] = $config['SHOW_THEME_TOGGLE'] ?? 'true';
 $config['SHOW_COMMENTS'] = $config['SHOW_COMMENTS'] ?? 'true';
 
+// Rate limiting & upload settings
+$config['MAX_UPLOAD_SIZE'] = $config['MAX_UPLOAD_SIZE'] ?? '10';
+$config['RATE_LIMIT_UPLOADS'] = $config['RATE_LIMIT_UPLOADS'] ?? '20';
+$config['RATE_LIMIT_COMMENTS'] = $config['RATE_LIMIT_COMMENTS'] ?? '10';
+$config['ENABLE_DOWNLOAD_LOG'] = $config['ENABLE_DOWNLOAD_LOG'] ?? 'false';
+
 define('BASE_DIR', realpath(__DIR__ . '/uploads') ?: __DIR__ . '/uploads');
 define('HIDDEN_FILES', array_map('trim', explode(',', $config['HIDDEN_FILES'])));
 define('COMMENTS_FILE', __DIR__ . '/comments.json');
+define('RATE_LIMIT_FILE', __DIR__ . '/rate_limits.json');
+define('DOWNLOAD_LOG_FILE', __DIR__ . '/downloads.log');
 
 // Ensure uploads directory exists
 if (!is_dir(BASE_DIR)) {
@@ -100,6 +108,15 @@ function sanitizePath(string $path): ?string
     if ($realPath === false || strpos($realPath, BASE_DIR) !== 0)
         return null;
     return $realPath;
+}
+
+/**
+ * URL encode path segments but keep slashes
+ */
+function safeUrlEncode(string $path): string
+{
+    $path = str_replace('\\', '/', $path);
+    return implode('/', array_map('rawurlencode', explode('/', $path)));
 }
 
 /**
@@ -232,6 +249,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
     $config['SHOW_THEME_TOGGLE'] = isset($_POST['show_theme_toggle']) ? 'true' : 'false';
     $config['SHOW_COMMENTS'] = isset($_POST['show_comments']) ? 'true' : 'false';
 
+    // Rate limiting & upload settings
+    $config['MAX_UPLOAD_SIZE'] = $_POST['max_upload_size'] ?? $config['MAX_UPLOAD_SIZE'];
+    $config['RATE_LIMIT_UPLOADS'] = $_POST['rate_limit_uploads'] ?? $config['RATE_LIMIT_UPLOADS'];
+    $config['RATE_LIMIT_COMMENTS'] = $_POST['rate_limit_comments'] ?? $config['RATE_LIMIT_COMMENTS'];
+    $config['ENABLE_DOWNLOAD_LOG'] = isset($_POST['enable_download_log']) ? 'true' : 'false';
+
     if (saveEnv($envPath, $config)) {
         $message = 'Settings saved!';
         $messageType = 'success';
@@ -286,10 +309,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     $index = (int) ($_POST['comment_index'] ?? -1);
     if (isset($comments[$index])) {
         array_splice($comments, $index, 1);
-        if (saveComments($comments)) {
+        if (file_put_contents(COMMENTS_FILE, json_encode($comments, JSON_PRETTY_PRINT))) {
             $message = 'Comment deleted!';
             $messageType = 'success';
         }
+    }
+}
+
+// Handle Clear Logs
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'clear_logs' && isAuthenticated()) {
+    $logFile = __DIR__ . '/downloads.log';
+    if (file_exists($logFile)) {
+        if (unlink($logFile)) {
+            $message = 'Download logs cleared!';
+            $messageType = 'success';
+        } else {
+            $message = 'Failed to clear logs!';
+            $messageType = 'danger';
+        }
+    } else {
+        $message = 'No logs to clear!';
+        $messageType = 'info';
     }
 }
 
@@ -444,9 +484,8 @@ $comments = isAuthenticated() ? getComments() : [];
     <meta name="theme-color" content="#00FFC8">
     <meta name="msapplication-TileColor" content="#0B1215">
 
-    <!-- Favicon (inline SVG) -->
-    <link rel="icon"
-        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%230B1215' width='100' height='100' rx='20'/><text y='70' x='50' text-anchor='middle' font-size='60'>⚙️</text></svg>">
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2">
 
     <!-- Stylesheets -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -591,6 +630,16 @@ $comments = isAuthenticated() ? getComments() : [];
                         <span class="badge bg-info"><?= count($comments) ?></span>
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="pill" href="#logs">
+                        <i class="bi bi-journal-text me-1"></i>Logs
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="pill" href="#server">
+                        <i class="bi bi-hdd-network me-1"></i>Server Info
+                    </a>
+                </li>
             </ul>
 
             <div class="tab-content">
@@ -633,6 +682,28 @@ $comments = isAuthenticated() ? getComments() : [];
                                                 <option value="bottom" <?= $config['README_POSITION'] === 'bottom' ? 'selected' : '' ?>>Bottom</option>
                                             </select>
                                         </div>
+                                        
+                                        <hr class="my-4">
+                                        <h6 class="text-info mb-3">Limits & Logging</h6>
+                                        
+                                        <div class="mb-3">
+                                            <label class="form-label">Max Upload Size (MB)</label>
+                                            <input type="number" name="max_upload_size" class="form-control" 
+                                                   value="<?= htmlspecialchars($config['MAX_UPLOAD_SIZE']) ?>" min="0">
+                                            <small class="text-muted">Set to 0 for unlimited</small>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-6 mb-3">
+                                                <label class="form-label">Upload Limit/Hr</label>
+                                                <input type="number" name="rate_limit_uploads" class="form-control" 
+                                                       value="<?= htmlspecialchars($config['RATE_LIMIT_UPLOADS']) ?>" min="0">
+                                            </div>
+                                            <div class="col-6 mb-3">
+                                                <label class="form-label">Comment Limit/Hr</label>
+                                                <input type="number" name="rate_limit_comments" class="form-control" 
+                                                       value="<?= htmlspecialchars($config['RATE_LIMIT_COMMENTS']) ?>" min="0">
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Visible Features</label>
@@ -667,6 +738,12 @@ $comments = isAuthenticated() ? getComments() : [];
                                                     <?= $config['SHOW_COMMENTS'] === 'true' ? 'checked' : '' ?>>
                                                 <label class="form-check-label">Comments Form</label>
                                             </div>
+                                            <hr class="my-2">
+                                            <div class="form-check">
+                                                <input type="checkbox" name="enable_download_log" class="form-check-input"
+                                                    <?= $config['ENABLE_DOWNLOAD_LOG'] === 'true' ? 'checked' : '' ?>>
+                                                <label class="form-check-label">Enable Download Log</label>
+                                            </div>
                                         </div>
                                         <button type="submit" class="btn btn-info mt-3 w-100">
                                             <i class="bi bi-save me-1"></i>Save Settings
@@ -687,7 +764,7 @@ $comments = isAuthenticated() ? getComments() : [];
                                 <nav class="d-inline-block ms-3 small">
                                     <?php foreach ($breadcrumbs as $i => $crumb): ?>
                                         <?php if ($i > 0): ?> / <?php endif; ?>
-                                        <a href="?dir=<?= urlencode($crumb['path']) ?>" class="text-decoration-none">
+                                        <a href="?dir=<?= safeUrlEncode($crumb['path']) ?>" class="text-decoration-none">
                                             <?= htmlspecialchars($crumb['name']) ?>
                                         </a>
                                     <?php endforeach; ?>
@@ -719,7 +796,7 @@ $comments = isAuthenticated() ? getComments() : [];
                                             <td>
                                                 <?php if ($item['isDir']): ?>
                                                     <i class="bi bi-folder-fill text-warning me-2"></i>
-                                                    <a href="?dir=<?= urlencode($item['path']) ?>" class="text-decoration-none">
+                                                    <a href="?dir=<?= safeUrlEncode($item['path']) ?>" class="text-decoration-none">
                                                         <?= htmlspecialchars($item['name']) ?>
                                                     </a>
                                                 <?php else: ?>
@@ -943,6 +1020,169 @@ $comments = isAuthenticated() ? getComments() : [];
                                 <?php endforeach; ?>
                             </div>
                         <?php endif; ?>
+                    </div>
+                </div>
+                </div>
+
+                <!-- Logs Tab -->
+                <div class="tab-pane fade" id="logs">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div><i class="bi bi-journal-text me-2"></i>Download Logs</div>
+                            <form method="POST" onsubmit="return confirm('Clear all logs?');">
+                                <input type="hidden" name="action" value="clear_logs">
+                                <button type="submit" class="btn btn-sm btn-danger">
+                                    <i class="bi bi-trash me-1"></i>Clear Logs
+                                </button>
+                            </form>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>IP Address</th>
+                                            <th>File</th>
+                                            <th>User Agent</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php
+                                        $logFile = __DIR__ . '/downloads.log';
+                                        if (file_exists($logFile)) {
+                                            $logs = array_reverse(file($logFile));
+                                            if (empty($logs)) {
+                                                echo "<tr><td colspan='4' class='text-center py-3 text-muted'>No logs found</td></tr>";
+                                            }
+                                            foreach ($logs as $log) {
+                                                if (trim($log) && preg_match('/^\[(.*?)\] IP: (.*?) \| File: (.*?) \| UA: (.*)$/', $log, $matches)) {
+                                                    echo "<tr>";
+                                                    echo "<td class='text-nowrap'>" . htmlspecialchars($matches[1]) . "</td>";
+                                                    echo "<td>" . htmlspecialchars($matches[2]) . "</td>";
+                                                    echo "<td>" . htmlspecialchars($matches[3]) . "</td>";
+                                                    echo "<td class='small text-muted'>" . htmlspecialchars($matches[4]) . "</td>";
+                                                    echo "</tr>";
+                                                }
+                                            }
+                                        } else {
+                                            echo "<tr><td colspan='4' class='text-center py-3 text-muted'>No logs found</td></tr>";
+                                        }
+                                        ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Server Info Tab -->
+                <div class="tab-pane fade" id="server">
+                    <div class="row">
+                        <div class="col-md-6 mb-4">
+                            <div class="card h-100">
+                                <div class="card-header"><i class="bi bi-hdd-network me-2"></i>Environment</div>
+                                <div class="list-group list-group-flush">
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <span>PHP Version</span>
+                                        <span class="badge bg-secondary"><?= phpversion() ?></span>
+                                    </div>
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <span>Server Software</span>
+                                        <small class="text-muted"><?= htmlspecialchars($_SERVER['SERVER_SOFTWARE'] ?? 'Unknown') ?></small>
+                                    </div>
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <span>Server IP</span>
+                                        <span class="badge bg-secondary"><?= $_SERVER['SERVER_ADDR'] ?? 'Unknown' ?></span>
+                                    </div>
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <span>Client IP</span>
+                                        <span class="badge bg-secondary"><?= $_SERVER['REMOTE_ADDR'] ?? 'Unknown' ?></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-4">
+                            <div class="card h-100">
+                                <div class="card-header"><i class="bi bi-gear-wide-connected me-2"></i>Configuration</div>
+                                <div class="list-group list-group-flush">
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <span>Upload Max Filesize</span>
+                                        <span class="badge bg-info"><?= ini_get('upload_max_filesize') ?></span>
+                                    </div>
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <span>Post Max Size</span>
+                                        <span class="badge bg-info"><?= ini_get('post_max_size') ?></span>
+                                    </div>
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <span>Memory Limit</span>
+                                        <span class="badge bg-info"><?= ini_get('memory_limit') ?></span>
+                                    </div>
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <span>Max Execution Time</span>
+                                        <span class="badge bg-info"><?= ini_get('max_execution_time') ?>s</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header"><i class="bi bi-clipboard-check me-2"></i>Requirement Checks</div>
+                                <div class="table-responsive">
+                                    <table class="table mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Check</th>
+                                                <th>Status</th>
+                                                <th>Message</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <!-- PHP Version Check -->
+                                            <?php $phpOk = version_compare(PHP_VERSION, '7.4.0', '>='); ?>
+                                            <tr>
+                                                <td>PHP Version >= 7.4</td>
+                                                <td><?= $phpOk ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-danger"></i>' ?></td>
+                                                <td class="small text-muted"><?= $phpOk ? 'Current: ' . PHP_VERSION : 'Update PHP to 7.4+' ?></td>
+                                            </tr>
+                                            
+                                            <!-- Extensions Check -->
+                                            <?php 
+                                            $exts = ['json', 'mbstring', 'fileinfo', 'gd'];
+                                            foreach ($exts as $ext): 
+                                                $loaded = extension_loaded($ext);
+                                            ?>
+                                            <tr>
+                                                <td><?= $ext ?> Extension</td>
+                                                <td><?= $loaded ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-danger"></i>' ?></td>
+                                                <td class="small text-muted"><?= $loaded ? 'Installed' : 'Install ' . $ext . ' extension' ?></td>
+                                            </tr>
+                                            <?php endforeach; ?>
+
+                                            <!-- Writable Checks -->
+                                            <?php 
+                                            $paths = [
+                                                'Uploads Dir' => BASE_DIR,
+                                                'Config File' => __DIR__ . '/.env',
+                                                'Comments Data' => COMMENTS_FILE,
+                                                'Rate Limits' => RATE_LIMIT_FILE ?? __DIR__ . '/rate_limits.json',
+                                                'Downloads Log' => DOWNLOAD_LOG_FILE ?? __DIR__ . '/downloads.log'
+                                            ];
+                                            foreach ($paths as $name => $path):
+                                                $exists = file_exists($path);
+                                                $writable = is_writable($exists ? $path : dirname($path));
+                                            ?>
+                                            <tr>
+                                                <td><?= $name ?> Writable</td>
+                                                <td><?= $writable ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-danger"></i>' ?></td>
+                                                <td class="small text-muted"><?= $writable ? 'Writable' : 'Check permissions' ?></td>
+                                            </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

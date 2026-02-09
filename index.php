@@ -488,6 +488,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
     }
 }
 
+// Handle Chunked Upload (AJAX - for large files)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chunked_upload' && isAuthenticated()) {
+    header('Content-Type: application/json');
+
+    if (!verifyCSRF()) {
+        echo json_encode(['success' => false, 'error' => 'Invalid token']);
+        exit;
+    }
+
+    $fileName = $_POST['fileName'] ?? '';
+    $chunkIndex = (int) ($_POST['chunkIndex'] ?? 0);
+    $totalChunks = (int) ($_POST['totalChunks'] ?? 1);
+    $uploadDir = isset($_POST['dir']) ? sanitizePath($_POST['dir']) : BASE_DIR;
+
+    if (!$uploadDir)
+        $uploadDir = BASE_DIR;
+
+    $tempDir = $uploadDir . DIRECTORY_SEPARATOR . '.upload_temp';
+    if (!is_dir($tempDir))
+        @mkdir($tempDir, 0755, true);
+
+    $tempFile = $tempDir . DIRECTORY_SEPARATOR . md5($fileName) . '_' . $chunkIndex;
+
+    if (isset($_FILES['chunk']) && $_FILES['chunk']['error'] === UPLOAD_ERR_OK) {
+        if (move_uploaded_file($_FILES['chunk']['tmp_name'], $tempFile)) {
+            // If this is the last chunk, merge all chunks
+            if ($chunkIndex === $totalChunks - 1) {
+                $finalPath = $uploadDir . DIRECTORY_SEPARATOR . basename($fileName);
+                $fp = fopen($finalPath, 'wb');
+
+                for ($i = 0; $i < $totalChunks; $i++) {
+                    $chunkPath = $tempDir . DIRECTORY_SEPARATOR . md5($fileName) . '_' . $i;
+                    if (file_exists($chunkPath)) {
+                        fwrite($fp, file_get_contents($chunkPath));
+                        unlink($chunkPath);
+                    }
+                }
+                fclose($fp);
+
+                // Cleanup temp dir if empty
+                @rmdir($tempDir);
+
+                recordAction('upload');
+                echo json_encode(['success' => true, 'complete' => true, 'message' => 'File uploaded successfully!']);
+            } else {
+                echo json_encode(['success' => true, 'complete' => false, 'chunkIndex' => $chunkIndex]);
+            }
+        } else {
+            echo json_encode(['success' => false, 'error' => 'Failed to save chunk']);
+        }
+    } else {
+        echo json_encode(['success' => false, 'error' => 'No chunk received']);
+    }
+    exit;
+}
+
 // Handle Comment Submission (Visitors only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit_comment' && !isAuthenticated()) {
     if (verifyCSRF()) {
@@ -770,6 +826,7 @@ if (file_exists($readmeFile)) {
 
                 <!-- Upload Form (Admin only) -->
                 <?php if (isAuthenticated() && SHOW_UPLOAD): ?>
+                    <!-- Original Quick Upload -->
                     <form method="POST" enctype="multipart/form-data" class="d-flex gap-2">
                         <input type="hidden" name="action" value="upload">
                         <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
@@ -778,6 +835,12 @@ if (file_exists($readmeFile)) {
                             style="max-width: 200px;">
                         <button type="submit" class="btn btn-sm btn-info"><i class="bi bi-upload"></i></button>
                     </form>
+
+                    <!-- Pretty Upload Button -->
+                    <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal"
+                        data-bs-target="#prettyUploadModal">
+                        <i class="bi bi-cloud-arrow-up"></i> Upload Large File
+                    </button>
                 <?php endif; ?>
             </div>
 
@@ -1005,6 +1068,170 @@ if (file_exists($readmeFile)) {
             if (saved) document.documentElement.setAttribute('data-bs-theme', saved);
         })();
     </script>
+
+    <!-- Pretty Upload Modal -->
+    <?php if (isAuthenticated() && SHOW_UPLOAD): ?>
+        <div class="modal fade" id="prettyUploadModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-cloud-arrow-up me-2"></i>Upload Large File</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="uploadDropZone" class="border border-2 border-dashed rounded-3 p-5 text-center mb-3"
+                            style="cursor: pointer; transition: all 0.3s;">
+                            <i class="bi bi-cloud-upload display-4 text-muted"></i>
+                            <p class="mt-2 mb-0 text-muted">Drag & drop file here or click to browse</p>
+                            <input type="file" id="prettyFileInput" class="d-none">
+                        </div>
+
+                        <div id="uploadProgress" class="d-none">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span id="uploadFileName" class="text-truncate" style="max-width: 70%;"></span>
+                                <span id="uploadPercent">0%</span>
+                            </div>
+                            <div class="progress" style="height: 25px;">
+                                <div id="uploadProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                    role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div id="uploadStatus" class="text-muted small mt-2"></div>
+                        </div>
+
+                        <div id="uploadResult" class="d-none">
+                            <div class="alert mb-0" id="uploadResultAlert"></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            (function () {
+                const dropZone = document.getElementById('uploadDropZone');
+                const fileInput = document.getElementById('prettyFileInput');
+                const progressDiv = document.getElementById('uploadProgress');
+                const resultDiv = document.getElementById('uploadResult');
+                const progressBar = document.getElementById('uploadProgressBar');
+                const percentText = document.getElementById('uploadPercent');
+                const fileNameText = document.getElementById('uploadFileName');
+                const statusText = document.getElementById('uploadStatus');
+                const resultAlert = document.getElementById('uploadResultAlert');
+
+                const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+                const CSRF_TOKEN = '<?= $_SESSION['csrf_token'] ?>';
+                const CURRENT_DIR = '<?= htmlspecialchars($relativePath) ?>';
+
+                // Drop zone events
+                dropZone.addEventListener('click', () => fileInput.click());
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.add('border-primary', 'bg-primary', 'bg-opacity-10');
+                });
+                dropZone.addEventListener('dragleave', () => {
+                    dropZone.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
+                });
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
+                    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+                });
+                fileInput.addEventListener('change', () => {
+                    if (fileInput.files.length) handleFile(fileInput.files[0]);
+                });
+
+                function handleFile(file) {
+                    dropZone.classList.add('d-none');
+                    progressDiv.classList.remove('d-none');
+                    resultDiv.classList.add('d-none');
+
+                    fileNameText.textContent = file.name;
+                    statusText.textContent = 'Preparing upload...';
+
+                    uploadChunked(file);
+                }
+
+                async function uploadChunked(file) {
+                    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+                    let uploadedChunks = 0;
+
+                    for (let i = 0; i < totalChunks; i++) {
+                        const start = i * CHUNK_SIZE;
+                        const end = Math.min(start + CHUNK_SIZE, file.size);
+                        const chunk = file.slice(start, end);
+
+                        const formData = new FormData();
+                        formData.append('action', 'chunked_upload');
+                        formData.append('csrf_token', CSRF_TOKEN);
+                        formData.append('fileName', file.name);
+                        formData.append('chunkIndex', i);
+                        formData.append('totalChunks', totalChunks);
+                        formData.append('dir', CURRENT_DIR);
+                        formData.append('chunk', chunk);
+
+                        try {
+                            const response = await fetch(window.location.pathname, {
+                                method: 'POST',
+                                body: formData
+                            });
+
+                            const result = await response.json();
+
+                            if (!result.success) {
+                                showResult(false, result.error || 'Upload failed');
+                                return;
+                            }
+
+                            uploadedChunks++;
+                            const percent = Math.round((uploadedChunks / totalChunks) * 100);
+                            progressBar.style.width = percent + '%';
+                            percentText.textContent = percent + '%';
+                            statusText.textContent = `Uploading chunk ${uploadedChunks} of ${totalChunks}...`;
+
+                            if (result.complete) {
+                                showResult(true, 'File uploaded successfully!');
+                            }
+                        } catch (error) {
+                            showResult(false, 'Network error: ' + error.message);
+                            return;
+                        }
+                    }
+                }
+
+                function showResult(success, message) {
+                    progressDiv.classList.add('d-none');
+                    resultDiv.classList.remove('d-none');
+                    resultAlert.className = 'alert mb-0 alert-' + (success ? 'success' : 'danger');
+                    resultAlert.innerHTML = (success ? '<i class="bi bi-check-circle me-2"></i>' : '<i class="bi bi-x-circle me-2"></i>') + message;
+
+                    if (success) {
+                        setTimeout(() => location.reload(), 1500);
+                    } else {
+                        // Reset for retry
+                        setTimeout(() => {
+                            dropZone.classList.remove('d-none');
+                            resultDiv.classList.add('d-none');
+                            progressBar.style.width = '0%';
+                            percentText.textContent = '0%';
+                        }, 3000);
+                    }
+                }
+
+                // Reset modal on close
+                document.getElementById('prettyUploadModal').addEventListener('hidden.bs.modal', () => {
+                    dropZone.classList.remove('d-none');
+                    progressDiv.classList.add('d-none');
+                    resultDiv.classList.add('d-none');
+                    progressBar.style.width = '0%';
+                    percentText.textContent = '0%';
+                    fileInput.value = '';
+                });
+            })();
+        </script>
+    <?php endif; ?>
 </body>
 
 </html>

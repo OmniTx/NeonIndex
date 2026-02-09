@@ -162,27 +162,6 @@ function isHiddenFile(string $filename): bool
 }
 
 /**
- * Recursively delete a directory and all its contents
- */
-function deleteRecursive(string $path): bool
-{
-    if (is_file($path)) {
-        return @unlink($path);
-    }
-    if (is_dir($path)) {
-        $items = scandir($path);
-        foreach ($items as $item) {
-            if ($item === '.' || $item === '..') continue;
-            if (!deleteRecursive($path . DIRECTORY_SEPARATOR . $item)) {
-                return false;
-            }
-        }
-        return @rmdir($path);
-    }
-    return false;
-}
-
-/**
  * Verify CSRF token
  */
 function verifyCSRF(): bool
@@ -392,7 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     if (verifyCSRF() && isset($_POST['file'])) {
         $filePath = sanitizePath($_POST['file']);
         if ($filePath && $filePath !== BASE_DIR) {
-            if (deleteRecursive($filePath)) {
+            if (is_dir($filePath) ? @rmdir($filePath) : @unlink($filePath)) {
                 $message = 'Deleted!';
                 $messageType = 'success';
             } else {
@@ -439,7 +418,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_
     foreach ($files as $file) {
         $path = realpath(BASE_DIR . DIRECTORY_SEPARATOR . $file);
         if ($path && strpos($path, BASE_DIR) === 0 && $path !== BASE_DIR) {
-            if (deleteRecursive($path))
+            if (is_dir($path) ? @rmdir($path) : @unlink($path))
                 $deleted++;
         }
     }
@@ -465,114 +444,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_
         }
         $message = "Moved {$moved} item(s)!";
         $messageType = 'success';
-    }
-}
-
-// Handle Get File Content
-if (($_GET['action'] ?? '') === 'get_content' && isAuthenticated()) {
-    $filePath = isset($_GET['file']) ? sanitizePath($_GET['file']) : '';
-    if ($filePath && is_file($filePath)) {
-        header('Content-Type: application/json');
-        echo json_encode([
-            'success' => true,
-            'content' => file_get_contents($filePath),
-            'path' => $_GET['file']
-        ]);
-        exit;
-    }
-    header('Content-Type: application/json');
-    echo json_encode(['success' => false, 'error' => 'File not found']);
-    exit;
-}
-
-// Handle Save File Content
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_content' && isAuthenticated()) {
-    if (verifyCSRF()) {
-        $filePath = isset($_POST['file']) ? sanitizePath($_POST['file']) : '';
-        $content = $_POST['content'] ?? '';
-        
-        if ($filePath && is_file($filePath)) {
-            if (file_put_contents($filePath, $content) !== false) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => true]);
-                exit;
-            }
-        }
-    }
-    header('Content-Type: application/json');
-    echo json_encode(['success' => false, 'error' => 'Failed to save']);
-    exit;
-}
-
-// Handle System Update
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'system_update' && isAuthenticated()) {
-    if (verifyCSRF()) {
-        $source = $_POST['source'] ?? '';
-        $tempZip = '';
-
-        if ($source === 'github') {
-            $url = 'https://github.com/OmniTx/NeonIndex/archive/refs/heads/main.zip';
-            $tempZip = tempnam(sys_get_temp_dir(), 'update_');
-            $context = stream_context_create(['http' => ['header' => 'User-Agent: NeonIndex-Updater']]);
-            $remote = @file_get_contents($url, false, $context);
-            if ($remote) file_put_contents($tempZip, $remote);
-            else $tempZip = false;
-        } elseif ($source === 'upload' && isset($_FILES['update_file']) && $_FILES['update_file']['error'] === UPLOAD_ERR_OK) {
-            $tempZip = $_FILES['update_file']['tmp_name'];
-        }
-
-        if ($tempZip && file_exists($tempZip)) {
-            $zip = new ZipArchive;
-            if ($zip->open($tempZip) === TRUE) {
-                $extractPath = __DIR__ . '/.update_temp';
-                if (!is_dir($extractPath)) @mkdir($extractPath);
-                $zip->extractTo($extractPath);
-                $zip->close();
-                
-                // Determine source directory (handle optional subdirectory from zip)
-                $sourceDir = $extractPath;
-                $subDirs = glob($extractPath . '/*', GLOB_ONLYDIR);
-                if (count($subDirs) === 1) {
-                    $sourceDir = $subDirs[0];
-                }
-
-                $iterator = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($sourceDir, RecursiveDirectoryIterator::SKIP_DOTS),
-                    RecursiveIteratorIterator::SELF_FIRST
-                );
-                
-                $updated = 0;
-                foreach ($iterator as $item) {
-                    $destPath = __DIR__ . DIRECTORY_SEPARATOR . $iterator->getSubPathName();
-                    
-                    // Skip preserved items
-                    if (basename($destPath) === '.env') continue;
-                    if (strpos($destPath, BASE_DIR) === 0) continue; // Skip uploads dir
-                    if (strpos($destPath, COMMENTS_FILE) === 0) continue;
-                    if (basename($destPath) === 'downloads.log') continue;
-                    if (basename($destPath) === 'rate_limits.json') continue;
-                    if (strpos($destPath, __DIR__ . DIRECTORY_SEPARATOR . 'sessions') === 0) continue;
-
-                    if ($item->isDir()) {
-                        if (!is_dir($destPath)) @mkdir($destPath);
-                    } else {
-                        if (@copy($item, $destPath)) $updated++;
-                    }
-                }
-                
-                deleteRecursive($extractPath);
-                if ($source === 'github' && file_exists($tempZip)) @unlink($tempZip);
-
-                $message = "System updated successfully! ({$updated} files)";
-                $messageType = 'success';
-            } else {
-                $message = 'Failed to open update package!';
-                $messageType = 'danger';
-            }
-        } else {
-            $message = 'Failed to retrieve update package! (Check internet connection or file)';
-            $messageType = 'danger';
-        }
     }
 }
 
@@ -703,7 +574,7 @@ $comments = isAuthenticated() ? getComments() : [];
     </style>
 </head>
 
-<body class="d-flex flex-column min-vh-100">
+<body>
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg sticky-top shadow-sm">
         <div class="container">
@@ -725,7 +596,7 @@ $comments = isAuthenticated() ? getComments() : [];
         </div>
     </nav>
 
-    <main class="container py-4 flex-grow-1">
+    <div class="container py-4">
         <!-- Alert Messages -->
         <?php if ($message): ?>
             <div class="alert alert-<?= $messageType ?> alert-dismissible fade show" role="alert">
@@ -866,64 +737,49 @@ $comments = isAuthenticated() ? getComments() : [];
                                         </div>
                                     </div>
                                     <div class="col-md-6">
-                                        <div class="mb-3">
-                                            <label class="form-label">Visible Features</label>
-                                            <div class="bg-body-secondary rounded p-3">
-                                                <div class="form-check">
-                                                    <input type="checkbox" name="show_download" class="form-check-input"
-                                                        <?= $config['SHOW_DOWNLOAD'] === 'true' ? 'checked' : '' ?>>
-                                                    <label class="form-check-label">Download Button</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input type="checkbox" name="show_rename" class="form-check-input"
-                                                        <?= $config['SHOW_RENAME'] === 'true' ? 'checked' : '' ?>>
-                                                    <label class="form-check-label">Rename Button</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input type="checkbox" name="show_delete" class="form-check-input"
-                                                        <?= $config['SHOW_DELETE'] === 'true' ? 'checked' : '' ?>>
-                                                    <label class="form-check-label">Delete Button</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input type="checkbox" name="show_upload" class="form-check-input"
-                                                        <?= $config['SHOW_UPLOAD'] === 'true' ? 'checked' : '' ?>>
-                                                    <label class="form-check-label">Upload Form</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input type="checkbox" name="show_theme_toggle" class="form-check-input"
-                                                        <?= $config['SHOW_THEME_TOGGLE'] === 'true' ? 'checked' : '' ?>>
-                                                    <label class="form-check-label">Theme Toggle</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input type="checkbox" name="show_comments" class="form-check-input"
-                                                        <?= $config['SHOW_COMMENTS'] === 'true' ? 'checked' : '' ?>>
-                                                    <label class="form-check-label">Comments Form</label>
-                                                </div>
-                                                <hr class="my-2">
-                                                <div class="form-check">
-                                                    <input type="checkbox" name="enable_download_log" class="form-check-input"
-                                                        <?= $config['ENABLE_DOWNLOAD_LOG'] === 'true' ? 'checked' : '' ?>>
-                                                    <label class="form-check-label">Enable Download Log</label>
-                                                </div>
+                                        <label class="form-label">Visible Features</label>
+                                        <div class="bg-body-secondary rounded p-3">
+                                            <div class="form-check">
+                                                <input type="checkbox" name="show_download" class="form-check-input"
+                                                    <?= $config['SHOW_DOWNLOAD'] === 'true' ? 'checked' : '' ?>>
+                                                <label class="form-check-label">Download Button</label>
                                             </div>
-                                            <button type="submit" class="btn btn-info mt-3 w-100">
-                                                <i class="bi bi-save me-1"></i>Save Settings
-                                            </button>
-                                            
-                                            <hr class="my-4">
-                                            <h6 class="text-info mb-3">System Update</h6>
-                                            <div class="d-grid gap-2">
-                                                <button type="button" class="btn btn-outline-primary" onclick="checkUpdate()">
-                                                    <i class="bi bi-github me-1"></i>Update from GitHub
-                                                </button>
-                                                <div class="input-group">
-                                                    <input type="file" class="form-control" id="updateZip" accept=".zip">
-                                                    <button class="btn btn-outline-secondary" type="button" onclick="uploadUpdate()">
-                                                        <i class="bi bi-upload me-1"></i>Local Update
-                                                    </button>
-                                                </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" name="show_rename" class="form-check-input"
+                                                    <?= $config['SHOW_RENAME'] === 'true' ? 'checked' : '' ?>>
+                                                <label class="form-check-label">Rename Button</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" name="show_delete" class="form-check-input"
+                                                    <?= $config['SHOW_DELETE'] === 'true' ? 'checked' : '' ?>>
+                                                <label class="form-check-label">Delete Button</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" name="show_upload" class="form-check-input"
+                                                    <?= $config['SHOW_UPLOAD'] === 'true' ? 'checked' : '' ?>>
+                                                <label class="form-check-label">Upload Form</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" name="show_theme_toggle" class="form-check-input"
+                                                    <?= $config['SHOW_THEME_TOGGLE'] === 'true' ? 'checked' : '' ?>>
+                                                <label class="form-check-label">Theme Toggle</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input type="checkbox" name="show_comments" class="form-check-input"
+                                                    <?= $config['SHOW_COMMENTS'] === 'true' ? 'checked' : '' ?>>
+                                                <label class="form-check-label">Comments Form</label>
+                                            </div>
+                                            <hr class="my-2">
+                                            <div class="form-check">
+                                                <input type="checkbox" name="enable_download_log" class="form-check-input"
+                                                    <?= $config['ENABLE_DOWNLOAD_LOG'] === 'true' ? 'checked' : '' ?>>
+                                                <label class="form-check-label">Enable Download Log</label>
                                             </div>
                                         </div>
+                                        <button type="submit" class="btn btn-info mt-3 w-100">
+                                            <i class="bi bi-save me-1"></i>Save Settings
+                                        </button>
+                                    </div>
                                 </div>
                             </form>
                         </div>
@@ -990,15 +846,6 @@ $comments = isAuthenticated() ? getComments() : [];
                                                         class="btn btn-sm btn-outline-secondary">
                                                         <i class="bi bi-download"></i>
                                                     </a>
-                                                <?php endif; ?>
-                                                <?php 
-                                                $ext = strtolower(pathinfo($item['name'], PATHINFO_EXTENSION));
-                                                $editable = in_array($ext, ['txt', 'md', 'json', 'css', 'js', 'php', 'html', 'xml', 'yml', 'yaml', 'env']);
-                                                if (!$item['isDir'] && $editable): ?>
-                                                    <button class="btn btn-sm btn-outline-info"
-                                                        onclick="showEditor('<?= htmlspecialchars(addslashes($item['path'])) ?>', '<?= htmlspecialchars(addslashes($item['name'])) ?>')">
-                                                        <i class="bi bi-file-text"></i>
-                                                    </button>
                                                 <?php endif; ?>
                                                 <?php if ($item['name'] !== '..'): ?>
                                                     <button class="btn btn-sm btn-outline-secondary"
@@ -1234,25 +1081,22 @@ $comments = isAuthenticated() ? getComments() : [];
                                     <tbody>
                                         <?php
                                         $logFile = __DIR__ . '/downloads.log';
-                                        $hasLogs = false;
                                         if (file_exists($logFile)) {
                                             $logs = array_reverse(file($logFile));
-                                            if (!empty($logs)) {
-                                                foreach ($logs as $log) {
-                                                    if (trim($log) && preg_match('/^\[(.*?)\] IP: (.*?) \| File: (.*?) \| UA: (.*)$/', $log, $matches)) {
-                                                        $hasLogs = true;
-                                                        echo "<tr>";
-                                                        echo "<td class='text-nowrap'>" . htmlspecialchars($matches[1]) . "</td>";
-                                                        echo "<td>" . htmlspecialchars($matches[2]) . "</td>";
-                                                        echo "<td>" . htmlspecialchars($matches[3]) . "</td>";
-                                                        echo "<td class='small text-muted'>" . htmlspecialchars($matches[4]) . "</td>";
-                                                        echo "</tr>";
-                                                    }
+                                            if (empty($logs)) {
+                                                echo "<tr><td colspan='4' class='text-center py-3 text-muted'>No logs found</td></tr>";
+                                            }
+                                            foreach ($logs as $log) {
+                                                if (trim($log) && preg_match('/^\[(.*?)\] IP: (.*?) \| File: (.*?) \| UA: (.*)$/', $log, $matches)) {
+                                                    echo "<tr>";
+                                                    echo "<td class='text-nowrap'>" . htmlspecialchars($matches[1]) . "</td>";
+                                                    echo "<td>" . htmlspecialchars($matches[2]) . "</td>";
+                                                    echo "<td>" . htmlspecialchars($matches[3]) . "</td>";
+                                                    echo "<td class='small text-muted'>" . htmlspecialchars($matches[4]) . "</td>";
+                                                    echo "</tr>";
                                                 }
                                             }
-                                        }
-                                        
-                                        if (!$hasLogs) {
+                                        } else {
                                             echo "<tr><td colspan='4' class='text-center py-3 text-muted'>No logs found</td></tr>";
                                         }
                                         ?>
@@ -1374,7 +1218,7 @@ $comments = isAuthenticated() ? getComments() : [];
                 </div>
             </div>
         <?php endif; ?>
-    </main>
+    </div>
 
     <!-- Rename Modal -->
     <div class="modal fade" id="renameModal" tabindex="-1">
@@ -1396,28 +1240,6 @@ $comments = isAuthenticated() ? getComments() : [];
                         <button type="submit" class="btn btn-info">Rename</button>
                     </div>
                 </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Editor Modal -->
-    <div class="modal fade" id="editorModal" tabindex="-1" data-bs-backdrop="static">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-file-text me-2"></i>Edit File: <span id="editorFileName"></span></h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body p-0">
-                    <input type="hidden" id="editorFilePath">
-                    <textarea id="editorContent" class="form-control border-0 rounded-0" rows="20" style="font-family: monospace; font-size: 14px; background: var(--bs-body-bg); color: var(--bs-body-color);"></textarea>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="button" class="btn btn-primary" onclick="saveContent()">
-                        <i class="bi bi-save me-1"></i>Save Changes
-                    </button>
-                </div>
             </div>
         </div>
     </div>
@@ -1491,113 +1313,6 @@ $comments = isAuthenticated() ? getComments() : [];
             const saved = localStorage.getItem('neonindex_theme');
             if (saved) document.documentElement.setAttribute('data-bs-theme', saved);
         })();
-        // Editor Functions
-        function showEditor(path, name) {
-            document.getElementById('editorFileName').textContent = name;
-            document.getElementById('editorFilePath').value = path;
-            const textarea = document.getElementById('editorContent');
-            
-            textarea.value = 'Loading...';
-            const modal = new bootstrap.Modal(document.getElementById('editorModal'));
-            modal.show();
-            
-            fetch(`?action=get_content&file=${encodeURIComponent(path)}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        textarea.value = data.content;
-                    } else {
-                        textarea.value = 'Error loading content: ' + (data.error || 'Unknown error');
-                    }
-                })
-                .catch(err => {
-                    textarea.value = 'Failed to load content';
-                    console.error(err);
-                });
-        }
-
-        function saveContent() {
-            const path = document.getElementById('editorFilePath').value;
-            const content = document.getElementById('editorContent').value;
-            const btn = document.querySelector('#editorModal .btn-primary');
-            
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
-            btn.disabled = true;
-            
-            const formData = new FormData();
-            formData.append('action', 'save_content');
-            formData.append('csrf_token', '<?= $_SESSION['csrf_token'] ?>');
-            formData.append('file', path);
-            formData.append('content', content);
-            
-            fetch('', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Success flash would be nice, but alert works for modal
-                    const saveBtn = document.querySelector('#editorModal .btn-primary');
-                    saveBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Saved!';
-                    saveBtn.classList.remove('btn-primary');
-                    saveBtn.classList.add('btn-success');
-                    setTimeout(() => {
-                        saveBtn.innerHTML = '<i class="bi bi-save me-1"></i>Save Changes';
-                        saveBtn.classList.remove('btn-success');
-                        saveBtn.classList.add('btn-primary');
-                        saveBtn.disabled = false;
-                    }, 1500);
-                } else {
-                    alert('Error saving file: ' + (data.error || 'Unknown error'));
-                    btn.innerHTML = originalText;
-                    btn.disabled = false;
-                }
-            })
-            .catch(err => {
-                alert('Failed to save file');
-                console.error(err);
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-            });
-        }
-
-        // Update Functions
-        function checkUpdate() {
-            if (!confirm('This will overwrite system files (uploads and configuration kept). Continue?')) return;
-            const form = document.createElement('form');
-            form.style.display = 'none';
-            form.method = 'POST';
-            form.innerHTML = `
-                <input type="hidden" name="action" value="system_update">
-                <input type="hidden" name="source" value="github">
-                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-            `;
-            document.body.appendChild(form);
-            form.submit();
-        }
-
-        function uploadUpdate() {
-            const input = document.getElementById('updateZip');
-            if (!input.files.length) return alert('Select a ZIP file first');
-            if (!confirm('This will overwrite system files with the ZIP content. Continue?')) return;
-            
-            const form = document.createElement('form');
-            form.style.display = 'none';
-            form.method = 'POST';
-            form.enctype = 'multipart/form-data';
-            form.innerHTML = `
-                <input type="hidden" name="action" value="system_update">
-                <input type="hidden" name="source" value="upload">
-                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-            `;
-            const fileInput = input.cloneNode(true);
-            fileInput.name = 'update_file';
-            form.appendChild(fileInput);
-            document.body.appendChild(form);
-            form.submit();
-        }
     </script>
 </body>
 

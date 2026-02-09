@@ -53,9 +53,94 @@ define('SHOW_COMMENTS', ($config['SHOW_COMMENTS'] ?? 'true') === 'true');
 define('BASE_DIR', realpath(__DIR__ . '/uploads') ?: __DIR__ . '/uploads');
 define('COMMENTS_FILE', __DIR__ . '/comments.json');
 
+// Upload & Rate Limiting Settings
+define('MAX_UPLOAD_SIZE', (int) ($config['MAX_UPLOAD_SIZE'] ?? 10));  // MB
+define('RATE_LIMIT_UPLOADS', (int) ($config['RATE_LIMIT_UPLOADS'] ?? 20));  // per hour
+define('RATE_LIMIT_COMMENTS', (int) ($config['RATE_LIMIT_COMMENTS'] ?? 10));  // per hour
+define('ENABLE_DOWNLOAD_LOG', ($config['ENABLE_DOWNLOAD_LOG'] ?? 'false') === 'true');
+define('RATE_LIMIT_FILE', __DIR__ . '/rate_limits.json');
+define('DOWNLOAD_LOG_FILE', __DIR__ . '/downloads.log');
+
 // CSRF Protection
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// =============================================================================
+// RATE LIMITING
+// =============================================================================
+
+/**
+ * Get rate limit data for current IP
+ */
+function getRateLimits(): array
+{
+    if (!file_exists(RATE_LIMIT_FILE))
+        return [];
+    $data = json_decode(file_get_contents(RATE_LIMIT_FILE), true);
+    return is_array($data) ? $data : [];
+}
+
+/**
+ * Save rate limit data
+ */
+function saveRateLimits(array $data): void
+{
+    file_put_contents(RATE_LIMIT_FILE, json_encode($data, JSON_PRETTY_PRINT));
+}
+
+/**
+ * Check if action is rate limited for current IP
+ */
+function isRateLimited(string $action, int $limit): bool
+{
+    if ($limit <= 0)
+        return false;  // 0 = disabled
+
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $limits = getRateLimits();
+    $hourAgo = time() - 3600;
+
+    // Clean old entries
+    if (isset($limits[$ip][$action])) {
+        $limits[$ip][$action] = array_filter($limits[$ip][$action], fn($t) => $t > $hourAgo);
+    }
+
+    $count = count($limits[$ip][$action] ?? []);
+    return $count >= $limit;
+}
+
+/**
+ * Record an action for rate limiting
+ */
+function recordAction(string $action): void
+{
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $limits = getRateLimits();
+
+    if (!isset($limits[$ip]))
+        $limits[$ip] = [];
+    if (!isset($limits[$ip][$action]))
+        $limits[$ip][$action] = [];
+
+    $limits[$ip][$action][] = time();
+    saveRateLimits($limits);
+}
+
+/**
+ * Log a download
+ */
+function logDownload(string $file): void
+{
+    if (!ENABLE_DOWNLOAD_LOG)
+        return;
+
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $time = date('Y-m-d H:i:s');
+    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+    $log = "[{$time}] IP: {$ip} | File: {$file} | UA: {$userAgent}\n";
+
+    file_put_contents(DOWNLOAD_LOG_FILE, $log, FILE_APPEND | LOCK_EX);
 }
 
 // =============================================================================
@@ -165,6 +250,15 @@ function formatBytes(int $bytes): string
 }
 
 /**
+ * URL encode path segments but keep slashes
+ */
+function safeUrlEncode(string $path): string
+{
+    $path = str_replace('\\', '/', $path);
+    return implode('/', array_map('rawurlencode', explode('/', $path)));
+}
+
+/**
  * Check if file should be hidden from listing
  */
 function isHiddenFile(string $filename): bool
@@ -218,7 +312,10 @@ $messageType = '';
 
 // Handle Login
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
-    if (($_POST['password'] ?? '') === ADMIN_PASSWORD) {
+    $password = $_POST['password'] ?? '';
+    // Use constant-time comparison to prevent timing attacks
+    if (hash_equals(ADMIN_PASSWORD, $password)) {
+        session_regenerate_id(true); // Prevent session fixation
         $_SESSION['authenticated'] = true;
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
@@ -230,9 +327,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login
 
 // Handle Logout
 if (($_GET['action'] ?? '') === 'logout') {
-    $_SESSION['authenticated'] = false;
+    $_SESSION = [];
+    session_destroy();
+    session_start();
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
+}
+
+// Handle Download (with logging)
+if (($_GET['action'] ?? '') === 'download' && isset($_GET['file'])) {
+    $filePath = sanitizePath($_GET['file']);
+    if ($filePath && is_file($filePath) && !isHiddenFile(basename($filePath))) {
+        logDownload($_GET['file']);
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="' . basename($filePath) . '"');
+        header('Content-Length: ' . filesize($filePath));
+        readfile($filePath);
+        exit;
+    }
+}
+
+// Handle Folder Download (ZIP)
+if (($_GET['action'] ?? '') === 'download_folder' && isset($_GET['folder'])) {
+    $folderPath = sanitizePath($_GET['folder']);
+    if ($folderPath && is_dir($folderPath) && class_exists('ZipArchive')) {
+        $zipName = basename($folderPath) . '.zip';
+        $tempZip = tempnam(sys_get_temp_dir(), 'zip_');
+
+        $zip = new ZipArchive();
+        if ($zip->open($tempZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
+            $files = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($folderPath, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::LEAVES_ONLY
+            );
+            foreach ($files as $file) {
+                if (!$file->isDir()) {
+                    $filePath = $file->getRealPath();
+                    $relativePath = substr($filePath, strlen($folderPath) + 1);
+                    $zip->addFile($filePath, $relativePath);
+                }
+            }
+            $zip->close();
+
+            logDownload($_GET['folder'] . ' (folder)');
+            header('Content-Type: application/zip');
+            header('Content-Disposition: attachment; filename="' . $zipName . '"');
+            header('Content-Length: ' . filesize($tempZip));
+            readfile($tempZip);
+            unlink($tempZip);
+            exit;
+        }
+    }
 }
 
 // Handle Delete (Admin only)
@@ -272,13 +417,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'renam
 // Handle Upload (Admin only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'upload' && isAuthenticated()) {
     if (verifyCSRF() && isset($_FILES['file']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
-        $currentDir = isset($_POST['dir']) ? sanitizePath($_POST['dir']) : BASE_DIR;
-        if (!$currentDir)
-            $currentDir = BASE_DIR;
-        $filename = basename($_FILES['file']['name']);
-        if (move_uploaded_file($_FILES['file']['tmp_name'], $currentDir . DIRECTORY_SEPARATOR . $filename)) {
-            $message = 'File uploaded!';
-            $messageType = 'success';
+        // Check rate limit
+        if (isRateLimited('upload', RATE_LIMIT_UPLOADS)) {
+            $message = 'Upload rate limit exceeded. Try again later.';
+            $messageType = 'warning';
+        }
+        // Check file size (0 = unlimited)
+        elseif (MAX_UPLOAD_SIZE > 0 && $_FILES['file']['size'] > MAX_UPLOAD_SIZE * 1024 * 1024) {
+            $message = 'File too large! Max: ' . MAX_UPLOAD_SIZE . 'MB';
+            $messageType = 'danger';
+        } else {
+            $currentDir = isset($_POST['dir']) ? sanitizePath($_POST['dir']) : BASE_DIR;
+            if (!$currentDir)
+                $currentDir = BASE_DIR;
+            $filename = basename($_FILES['file']['name']);
+            if (move_uploaded_file($_FILES['file']['tmp_name'], $currentDir . DIRECTORY_SEPARATOR . $filename)) {
+                recordAction('upload');
+                $message = 'File uploaded!';
+                $messageType = 'success';
+            } else {
+                $message = 'Upload failed!';
+                $messageType = 'danger';
+            }
         }
     }
 }
@@ -286,29 +446,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
 // Handle Comment Submission (Visitors only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit_comment' && !isAuthenticated()) {
     if (verifyCSRF()) {
-        $name = trim($_POST['comment_name'] ?? 'Anonymous');
-        $email = trim($_POST['comment_email'] ?? '');
-        $commentMessage = trim($_POST['comment_message'] ?? '');
+        // Check rate limit
+        if (isRateLimited('comment', RATE_LIMIT_COMMENTS)) {
+            $message = 'Comment rate limit exceeded. Try again later.';
+            $messageType = 'warning';
+        } else {
+            $name = trim($_POST['comment_name'] ?? 'Anonymous');
+            $email = trim($_POST['comment_email'] ?? '');
+            $commentMessage = trim($_POST['comment_message'] ?? '');
 
-        if ($commentMessage) {
-            $comments = file_exists(COMMENTS_FILE) ? json_decode(file_get_contents(COMMENTS_FILE), true) : [];
-            if (!is_array($comments))
-                $comments = [];
+            if ($commentMessage) {
+                $comments = file_exists(COMMENTS_FILE) ? json_decode(file_get_contents(COMMENTS_FILE), true) : [];
+                if (!is_array($comments))
+                    $comments = [];
 
-            $comments[] = [
-                'name' => $name ?: 'Anonymous',
-                'email' => $email,
-                'message' => $commentMessage,
-                'date' => date('Y-m-d H:i:s'),
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? ''
-            ];
+                $comments[] = [
+                    'name' => $name ?: 'Anonymous',
+                    'email' => $email,
+                    'message' => $commentMessage,
+                    'date' => date('Y-m-d H:i:s'),
+                    'ip' => $_SERVER['REMOTE_ADDR'] ?? ''
+                ];
 
-            if (file_put_contents(COMMENTS_FILE, json_encode($comments, JSON_PRETTY_PRINT))) {
-                $message = 'Comment submitted! Thank you.';
-                $messageType = 'success';
-            } else {
-                $message = 'Failed to submit comment.';
-                $messageType = 'danger';
+                if (file_put_contents(COMMENTS_FILE, json_encode($comments, JSON_PRETTY_PRINT))) {
+                    recordAction('comment');
+                    $message = 'Comment submitted! Thank you.';
+                    $messageType = 'success';
+                } else {
+                    $message = 'Failed to submit comment.';
+                    $messageType = 'danger';
+                }
             }
         }
     }
@@ -377,31 +544,35 @@ if (file_exists($readmeFile)) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <title><?= htmlspecialchars(SITE_TITLE) ?></title>
-    
+
     <!-- SEO Meta Tags -->
-    <meta name="description" content="<?= htmlspecialchars(SITE_TITLE) ?> - A modern file directory browser with theme switching and admin management.">
+    <meta name="description"
+        content="<?= htmlspecialchars(SITE_TITLE) ?> - A modern file directory browser with theme switching and admin management.">
     <meta name="keywords" content="file browser, directory listing, file manager, php directory lister">
     <meta name="author" content="OmniTx">
     <meta name="robots" content="index, follow">
-    
+
     <!-- Open Graph / Social Media -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="<?= htmlspecialchars(SITE_TITLE) ?>">
-    <meta property="og:description" content="A modern file directory browser with theme switching and admin management.">
+    <meta property="og:description"
+        content="A modern file directory browser with theme switching and admin management.">
     <meta property="og:site_name" content="<?= htmlspecialchars(SITE_TITLE) ?>">
-    
+
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="<?= htmlspecialchars(SITE_TITLE) ?>">
-    <meta name="twitter:description" content="A modern file directory browser with theme switching and admin management.">
-    
+    <meta name="twitter:description"
+        content="A modern file directory browser with theme switching and admin management.">
+
     <!-- Theme Color -->
     <meta name="theme-color" content="#00FFC8">
     <meta name="msapplication-TileColor" content="#0B1215">
-    
+
     <!-- Favicon (inline SVG) -->
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%230B1215' width='100' height='100' rx='20'/><text y='70' x='50' text-anchor='middle' font-size='60'>📁</text></svg>">
-    
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%2300ffc8' class='bi bi-hdd-network' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 5a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zM3 4.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z'/%3E%3Cpath d='M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2H8.5v3a1.5 1.5 0 0 1 1.5 1.5h5.5a.5.5 0 0 1 0 1H10A1.5 1.5 0 0 1 8.5 14h-1A1.5 1.5 0 0 1 6 12.5H.5a.5.5 0 0 1 0-1H6A1.5 1.5 0 0 1 7.5 10V7H2a2 2 0 0 1-2-2V4zm1 0v1a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1zm6 7.5v1a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5z'/%3E%3C/svg%3E">
+
     <!-- Stylesheets -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
@@ -494,7 +665,7 @@ if (file_exists($readmeFile)) {
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg sticky-top shadow-sm">
         <div class="container">
-            <a class="navbar-brand d-flex align-items-center gap-2" href="?">
+            <a class="navbar-brand d-flex align-items-center gap-2" href="index.php">
                 <i class="bi bi-folder-fill text-info fs-4"></i>
                 <span class="fw-bold glow"><?= htmlspecialchars(SITE_TITLE) ?></span>
             </a>
@@ -544,7 +715,7 @@ if (file_exists($readmeFile)) {
                     <ol class="breadcrumb mb-0">
                         <?php foreach ($breadcrumbs as $crumb): ?>
                             <li class="breadcrumb-item">
-                                <a href="?dir=<?= urlencode($crumb['path']) ?>" class="text-decoration-none">
+                                <a href="?dir=<?= safeUrlEncode($crumb['path']) ?>" class="text-decoration-none">
                                     <?= htmlspecialchars($crumb['name']) ?>
                                 </a>
                             </li>
@@ -588,7 +759,7 @@ if (file_exists($readmeFile)) {
                                     <td>
                                         <?php if ($item['isDir']): ?>
                                             <i class="bi bi-folder-fill text-warning me-2"></i>
-                                            <a href="?dir=<?= urlencode($item['path']) ?>" class="text-decoration-none">
+                                            <a href="?dir=<?= safeUrlEncode($item['path']) ?>" class="text-decoration-none">
                                                 <?= htmlspecialchars($item['name']) ?>
                                             </a>
                                         <?php else: ?>
@@ -603,8 +774,14 @@ if (file_exists($readmeFile)) {
                                         <?= date('M d, Y H:i', $item['modified']) ?>
                                     </td>
                                     <td class="text-end">
+                                        <?php if ($item['isDir'] && $item['name'] !== '..' && SHOW_DOWNLOAD): ?>
+                                            <a href="?action=download_folder&folder=<?= safeUrlEncode($item['path']) ?>"
+                                                class="btn btn-sm btn-outline-info" title="Download as ZIP">
+                                                <i class="bi bi-file-zip"></i>
+                                            </a>
+                                        <?php endif; ?>
                                         <?php if (!$item['isDir'] && $item['name'] !== '..' && SHOW_DOWNLOAD): ?>
-                                            <a href="uploads/<?= htmlspecialchars($item['path']) ?>" download
+                                            <a href="?action=download&file=<?= safeUrlEncode($item['path']) ?>"
                                                 class="btn btn-sm btn-outline-secondary" title="Download">
                                                 <i class="bi bi-download"></i>
                                             </a>

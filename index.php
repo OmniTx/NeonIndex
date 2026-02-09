@@ -12,6 +12,12 @@
 
 session_start();
 
+// Disable caching for dynamic content (required for LiteSpeed servers)
+header('Cache-Control: no-cache, no-store, must-revalidate, private');
+header('Pragma: no-cache');
+header('Expires: 0');
+header('X-LiteSpeed-Cache-Control: no-cache');
+
 // =============================================================================
 // CONFIGURATION
 // =============================================================================

@@ -333,6 +333,13 @@ function getFileIcon(string $filename): string
 $message = '';
 $messageType = '';
 
+// Check for flash message from redirect
+if (isset($_SESSION['flash_message'])) {
+    $message = $_SESSION['flash_message'];
+    $messageType = $_SESSION['flash_type'] ?? 'info';
+    unset($_SESSION['flash_message'], $_SESSION['flash_type']);
+}
+
 // Handle Login
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
     $password = $_POST['password'] ?? '';
@@ -384,10 +391,32 @@ if (($_GET['action'] ?? '') === 'download' && isset($_GET['file'])) {
     $filePath = sanitizePath($_GET['file']);
     if ($filePath && is_file($filePath) && !isHiddenFile(basename($filePath))) {
         logDownload($_GET['file']);
+
+        // Disable output buffering and increase limits for large files
+        @ini_set('memory_limit', '-1');
+        @ini_set('max_execution_time', '0');
+        @set_time_limit(0);
+
+        if (ob_get_level())
+            ob_end_clean();
+
+        $fileSize = filesize($filePath);
+
         header('Content-Type: application/octet-stream');
         header('Content-Disposition: attachment; filename="' . basename($filePath) . '"');
-        header('Content-Length: ' . filesize($filePath));
-        readfile($filePath);
+        header('Content-Length: ' . $fileSize);
+        header('Content-Transfer-Encoding: binary');
+        header('Cache-Control: no-cache, must-revalidate');
+
+        // Stream file in chunks (8KB at a time)
+        $handle = fopen($filePath, 'rb');
+        if ($handle) {
+            while (!feof($handle) && !connection_aborted()) {
+                echo fread($handle, 8192);
+                flush();
+            }
+            fclose($handle);
+        }
         exit;
     }
 }
@@ -464,13 +493,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
     if (verifyCSRF() && isset($_FILES['file']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
         // Check rate limit
         if (isRateLimited('upload', RATE_LIMIT_UPLOADS)) {
-            $message = 'Upload rate limit exceeded. Try again later.';
-            $messageType = 'warning';
+            $_SESSION['flash_message'] = 'Upload rate limit exceeded. Try again later.';
+            $_SESSION['flash_type'] = 'warning';
         }
         // Check file size (0 = unlimited)
         elseif (MAX_UPLOAD_SIZE > 0 && $_FILES['file']['size'] > MAX_UPLOAD_SIZE * 1024 * 1024) {
-            $message = 'File too large! Max: ' . MAX_UPLOAD_SIZE . 'MB';
-            $messageType = 'danger';
+            $_SESSION['flash_message'] = 'File too large! Max: ' . MAX_UPLOAD_SIZE . 'MB';
+            $_SESSION['flash_type'] = 'danger';
         } else {
             $currentDir = isset($_POST['dir']) ? sanitizePath($_POST['dir']) : BASE_DIR;
             if (!$currentDir)
@@ -478,13 +507,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
             $filename = basename($_FILES['file']['name']);
             if (move_uploaded_file($_FILES['file']['tmp_name'], $currentDir . DIRECTORY_SEPARATOR . $filename)) {
                 recordAction('upload');
-                $message = 'File uploaded!';
-                $messageType = 'success';
+                $_SESSION['flash_message'] = 'File uploaded!';
+                $_SESSION['flash_type'] = 'success';
             } else {
-                $message = 'Upload failed!';
-                $messageType = 'danger';
+                $_SESSION['flash_message'] = 'Upload failed!';
+                $_SESSION['flash_type'] = 'danger';
             }
         }
+        // Redirect to prevent form resubmission
+        $redirectUrl = $_SERVER['PHP_SELF'];
+        if (isset($_POST['dir']) && $_POST['dir'] !== '') {
+            $redirectUrl .= '?dir=' . urlencode($_POST['dir']);
+        }
+        header('Location: ' . $redirectUrl);
+        exit;
     }
 }
 
@@ -515,7 +551,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chunk
         if (move_uploaded_file($_FILES['chunk']['tmp_name'], $tempFile)) {
             // If this is the last chunk, merge all chunks
             if ($chunkIndex === $totalChunks - 1) {
-                $finalPath = $uploadDir . DIRECTORY_SEPARATOR . basename($fileName);
+                // Handle folder structure (fileName might be "folder/subfolder/file.txt")
+                $relativePath = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $fileName);
+                $relativePath = ltrim($relativePath, DIRECTORY_SEPARATOR);
+
+                // Create subdirectories if needed
+                $finalDir = $uploadDir;
+                if (strpos($relativePath, DIRECTORY_SEPARATOR) !== false) {
+                    $pathParts = explode(DIRECTORY_SEPARATOR, $relativePath);
+                    $justFileName = array_pop($pathParts);
+                    $subPath = implode(DIRECTORY_SEPARATOR, $pathParts);
+                    $finalDir = $uploadDir . DIRECTORY_SEPARATOR . $subPath;
+                    if (!is_dir($finalDir)) {
+                        @mkdir($finalDir, 0755, true);
+                    }
+                    $relativePath = $justFileName;
+                }
+
+                $finalPath = $finalDir . DIRECTORY_SEPARATOR . basename($relativePath);
                 $fp = fopen($finalPath, 'wb');
 
                 for ($i = 0; $i < $totalChunks; $i++) {
@@ -1072,30 +1125,39 @@ if (file_exists($readmeFile)) {
     <!-- Pretty Upload Modal -->
     <?php if (isAuthenticated() && SHOW_UPLOAD): ?>
         <div class="modal fade" id="prettyUploadModal" tabindex="-1">
-            <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-cloud-arrow-up me-2"></i>Upload Large File</h5>
+                        <h5 class="modal-title"><i class="bi bi-cloud-arrow-up me-2"></i>Upload Files</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <div id="uploadDropZone" class="border border-2 border-dashed rounded-3 p-5 text-center mb-3"
+                        <div id="uploadDropZone" class="border border-2 border-dashed rounded-3 p-4 text-center mb-3"
                             style="cursor: pointer; transition: all 0.3s;">
                             <i class="bi bi-cloud-upload display-4 text-muted"></i>
-                            <p class="mt-2 mb-0 text-muted">Drag & drop file here or click to browse</p>
-                            <input type="file" id="prettyFileInput" class="d-none">
+                            <p class="mt-2 mb-2 text-muted">Drag & drop files/folders here or click to browse</p>
+                            <div class="d-flex gap-2 justify-content-center flex-wrap">
+                                <input type="file" id="prettyFileInput" class="d-none" multiple>
+                                <input type="file" id="prettyFolderInput" class="d-none" webkitdirectory>
+                                <button type="button" class="btn btn-outline-primary btn-sm" id="btnSelectFiles">
+                                    <i class="bi bi-files me-1"></i>Select Files
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="btnSelectFolder">
+                                    <i class="bi bi-folder me-1"></i>Select Folder
+                                </button>
+                            </div>
                         </div>
 
                         <div id="uploadProgress" class="d-none">
+                            <div id="uploadFilesList" class="mb-3" style="max-height: 200px; overflow-y: auto;"></div>
                             <div class="d-flex justify-content-between mb-1">
-                                <span id="uploadFileName" class="text-truncate" style="max-width: 70%;"></span>
+                                <span id="uploadOverallStatus">Uploading...</span>
                                 <span id="uploadPercent">0%</span>
                             </div>
                             <div class="progress" style="height: 25px;">
                                 <div id="uploadProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
                                     role="progressbar" style="width: 0%"></div>
                             </div>
-                            <div id="uploadStatus" class="text-muted small mt-2"></div>
                         </div>
 
                         <div id="uploadResult" class="d-none">
@@ -1113,20 +1175,30 @@ if (file_exists($readmeFile)) {
             (function () {
                 const dropZone = document.getElementById('uploadDropZone');
                 const fileInput = document.getElementById('prettyFileInput');
+                const folderInput = document.getElementById('prettyFolderInput');
                 const progressDiv = document.getElementById('uploadProgress');
                 const resultDiv = document.getElementById('uploadResult');
                 const progressBar = document.getElementById('uploadProgressBar');
                 const percentText = document.getElementById('uploadPercent');
-                const fileNameText = document.getElementById('uploadFileName');
-                const statusText = document.getElementById('uploadStatus');
+                const filesList = document.getElementById('uploadFilesList');
+                const overallStatus = document.getElementById('uploadOverallStatus');
                 const resultAlert = document.getElementById('uploadResultAlert');
 
-                const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+                const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB chunks for faster uploads
                 const CSRF_TOKEN = '<?= $_SESSION['csrf_token'] ?>';
                 const CURRENT_DIR = '<?= htmlspecialchars($relativePath) ?>';
 
-                // Drop zone events
-                dropZone.addEventListener('click', () => fileInput.click());
+                // Button events
+                document.getElementById('btnSelectFiles').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    fileInput.click();
+                });
+                document.getElementById('btnSelectFolder').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    folderInput.click();
+                });
+
+                // Drop zone drag events
                 dropZone.addEventListener('dragover', (e) => {
                     e.preventDefault();
                     dropZone.classList.add('border-primary', 'bg-primary', 'bg-opacity-10');
@@ -1137,26 +1209,78 @@ if (file_exists($readmeFile)) {
                 dropZone.addEventListener('drop', (e) => {
                     e.preventDefault();
                     dropZone.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
-                    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
-                });
-                fileInput.addEventListener('change', () => {
-                    if (fileInput.files.length) handleFile(fileInput.files[0]);
+                    if (e.dataTransfer.files.length) handleFiles(Array.from(e.dataTransfer.files));
                 });
 
-                function handleFile(file) {
+                // File/folder input events
+                fileInput.addEventListener('change', () => {
+                    if (fileInput.files.length) handleFiles(Array.from(fileInput.files));
+                });
+                folderInput.addEventListener('change', () => {
+                    if (folderInput.files.length) handleFiles(Array.from(folderInput.files));
+                });
+
+                function handleFiles(files) {
+                    if (!files.length) return;
+
                     dropZone.classList.add('d-none');
                     progressDiv.classList.remove('d-none');
                     resultDiv.classList.add('d-none');
 
-                    fileNameText.textContent = file.name;
-                    statusText.textContent = 'Preparing upload...';
+                    // Show file list
+                    filesList.innerHTML = files.map((f, i) =>
+                        `<div class="d-flex justify-content-between small py-1 border-bottom" id="file-${i}">
+                            <span class="text-truncate" style="max-width: 70%;">${f.webkitRelativePath || f.name}</span>
+                            <span class="text-muted" id="file-status-${i}">Pending</span>
+                        </div>`
+                    ).join('');
 
-                    uploadChunked(file);
+                    uploadAllFiles(files);
                 }
 
-                async function uploadChunked(file) {
+                async function uploadAllFiles(files) {
+                    let completed = 0;
+                    let failed = 0;
+
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        const statusEl = document.getElementById(`file-status-${i}`);
+                        const rowEl = document.getElementById(`file-${i}`);
+
+                        statusEl.textContent = 'Uploading...';
+                        statusEl.className = 'text-primary';
+
+                        const success = await uploadChunked(file, (percent) => {
+                            statusEl.textContent = percent + '%';
+                            // Update overall progress
+                            const overall = Math.round(((completed + percent / 100) / files.length) * 100);
+                            progressBar.style.width = overall + '%';
+                            percentText.textContent = overall + '%';
+                            overallStatus.textContent = `Uploading ${i + 1} of ${files.length}: ${file.name}`;
+                        });
+
+                        if (success) {
+                            completed++;
+                            statusEl.textContent = '✓ Done';
+                            statusEl.className = 'text-success';
+                        } else {
+                            failed++;
+                            statusEl.textContent = '✗ Failed';
+                            statusEl.className = 'text-danger';
+                        }
+                    }
+
+                    // Final result
+                    if (failed === 0) {
+                        showResult(true, `All ${completed} file(s) uploaded successfully!`);
+                    } else {
+                        showResult(false, `${completed} uploaded, ${failed} failed`);
+                    }
+                }
+
+                async function uploadChunked(file, onProgress) {
                     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-                    let uploadedChunks = 0;
+                    const relativePath = file.webkitRelativePath || file.name;
 
                     for (let i = 0; i < totalChunks; i++) {
                         const start = i * CHUNK_SIZE;
@@ -1166,7 +1290,7 @@ if (file_exists($readmeFile)) {
                         const formData = new FormData();
                         formData.append('action', 'chunked_upload');
                         formData.append('csrf_token', CSRF_TOKEN);
-                        formData.append('fileName', file.name);
+                        formData.append('fileName', relativePath);
                         formData.append('chunkIndex', i);
                         formData.append('totalChunks', totalChunks);
                         formData.append('dir', CURRENT_DIR);
@@ -1181,24 +1305,17 @@ if (file_exists($readmeFile)) {
                             const result = await response.json();
 
                             if (!result.success) {
-                                showResult(false, result.error || 'Upload failed');
-                                return;
+                                console.error('Chunk failed:', result.error);
+                                return false;
                             }
 
-                            uploadedChunks++;
-                            const percent = Math.round((uploadedChunks / totalChunks) * 100);
-                            progressBar.style.width = percent + '%';
-                            percentText.textContent = percent + '%';
-                            statusText.textContent = `Uploading chunk ${uploadedChunks} of ${totalChunks}...`;
-
-                            if (result.complete) {
-                                showResult(true, 'File uploaded successfully!');
-                            }
+                            onProgress(Math.round(((i + 1) / totalChunks) * 100));
                         } catch (error) {
-                            showResult(false, 'Network error: ' + error.message);
-                            return;
+                            console.error('Network error:', error);
+                            return false;
                         }
                     }
+                    return true;
                 }
 
                 function showResult(success, message) {
@@ -1210,7 +1327,6 @@ if (file_exists($readmeFile)) {
                     if (success) {
                         setTimeout(() => location.reload(), 1500);
                     } else {
-                        // Reset for retry
                         setTimeout(() => {
                             dropZone.classList.remove('d-none');
                             resultDiv.classList.add('d-none');
@@ -1228,6 +1344,8 @@ if (file_exists($readmeFile)) {
                     progressBar.style.width = '0%';
                     percentText.textContent = '0%';
                     fileInput.value = '';
+                    folderInput.value = '';
+                    filesList.innerHTML = '';
                 });
             })();
         </script>

@@ -10,7 +10,25 @@
  * @license MIT
  */
 
+// Use local session directory if default path is not writable
+$sessionPath = ini_get('session.save_path');
+if (empty($sessionPath) || !is_writable($sessionPath)) {
+    $localSessionPath = __DIR__ . '/sessions';
+    if (!is_dir($localSessionPath)) {
+        @mkdir($localSessionPath, 0700, true);
+    }
+    if (is_writable($localSessionPath)) {
+        session_save_path($localSessionPath);
+    }
+}
+
 session_start();
+
+// Disable caching for dynamic content (required for LiteSpeed servers)
+header('Cache-Control: no-cache, no-store, must-revalidate, private');
+header('Pragma: no-cache');
+header('Expires: 0');
+header('X-LiteSpeed-Cache-Control: no-cache');
 
 // =============================================================================
 // CONFIGURATION

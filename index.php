@@ -357,6 +357,28 @@ if (($_GET['action'] ?? '') === 'logout') {
     exit;
 }
 
+// Handle View (display file in browser)
+if (($_GET['action'] ?? '') === 'view' && isset($_GET['file'])) {
+    $filePath = sanitizePath($_GET['file']);
+    if ($filePath && is_file($filePath) && !isHiddenFile(basename($filePath))) {
+        $mimeType = mime_content_type($filePath) ?: 'application/octet-stream';
+        $fileName = basename($filePath);
+
+        // For text files, force text/plain to display properly
+        $ext = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+        $textExtensions = ['txt', 'md', 'json', 'xml', 'csv', 'log', 'ini', 'yml', 'yaml', 'css', 'js', 'php', 'html', 'htm', 'sql'];
+        if (in_array($ext, $textExtensions)) {
+            $mimeType = 'text/plain; charset=utf-8';
+        }
+
+        header('Content-Type: ' . $mimeType);
+        header('Content-Disposition: inline; filename="' . $fileName . '"');
+        header('Content-Length: ' . filesize($filePath));
+        readfile($filePath);
+        exit;
+    }
+}
+
 // Handle Download (with logging)
 if (($_GET['action'] ?? '') === 'download' && isset($_GET['file'])) {
     $filePath = sanitizePath($_GET['file']);
@@ -787,7 +809,10 @@ if (file_exists($readmeFile)) {
                                             </a>
                                         <?php else: ?>
                                             <i class="bi <?= getFileIcon($item['name']) ?> text-secondary me-2"></i>
-                                            <span><?= htmlspecialchars($item['name']) ?></span>
+                                            <a href="?action=view&file=<?= safeUrlEncode($item['path']) ?>"
+                                                class="text-decoration-none" target="_blank">
+                                                <?= htmlspecialchars($item['name']) ?>
+                                            </a>
                                         <?php endif; ?>
                                     </td>
                                     <td class="text-muted d-none d-sm-table-cell">
@@ -805,8 +830,8 @@ if (file_exists($readmeFile)) {
                                         <?php endif; ?>
                                         <?php if (!$item['isDir'] && $item['name'] !== '..' && SHOW_DOWNLOAD): ?>
                                             <a href="?action=download&file=<?= safeUrlEncode($item['path']) ?>"
-                                                class="btn btn-sm btn-outline-secondary" title="Download">
-                                                <i class="bi bi-download"></i>
+                                                class="btn btn-sm btn-outline-secondary">
+                                                Download
                                             </a>
                                         <?php endif; ?>
                                         <?php if (isAuthenticated() && $item['name'] !== '..'): ?>

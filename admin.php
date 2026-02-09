@@ -22,6 +22,11 @@ if (empty($sessionPath) || !is_writable($sessionPath)) {
     }
 }
 
+// Session garbage collection - cleanup after 48 hours (172800 seconds)
+ini_set('session.gc_maxlifetime', 172800);
+ini_set('session.gc_probability', 1);
+ini_set('session.gc_divisor', 100);
+
 session_start();
 
 // Disable caching for dynamic content (required for LiteSpeed servers)
@@ -84,6 +89,7 @@ $config['SHOW_COMMENTS'] = $config['SHOW_COMMENTS'] ?? 'true';
 
 // Rate limiting & upload settings
 $config['MAX_UPLOAD_SIZE'] = $config['MAX_UPLOAD_SIZE'] ?? '10';
+$config['CHUNK_SIZE_MB'] = $config['CHUNK_SIZE_MB'] ?? '8';
 $config['RATE_LIMIT_UPLOADS'] = $config['RATE_LIMIT_UPLOADS'] ?? '20';
 $config['RATE_LIMIT_COMMENTS'] = $config['RATE_LIMIT_COMMENTS'] ?? '10';
 $config['ENABLE_DOWNLOAD_LOG'] = $config['ENABLE_DOWNLOAD_LOG'] ?? 'false';
@@ -227,6 +233,28 @@ function getDirectories($dir, $base = '')
     return $dirs;
 }
 
+/**
+ * Recursively delete a directory and its contents
+ */
+function recursiveDelete($dir) {
+    if (!file_exists($dir)) return true;
+    if (!is_dir($dir)) return @unlink($dir);
+    
+    foreach (scandir($dir) as $item) {
+        if ($item == '.' || $item == '..') continue;
+        if (!recursiveDelete($dir . DIRECTORY_SEPARATOR . $item)) return false;
+    }
+    return @rmdir($dir);
+}
+
+/**
+ * Check if file is editable text
+ */
+function isEditable($filename) {
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    return in_array($ext, ['txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'php', 'sql', 'log', 'env', 'yml', 'yaml', 'ini', 'conf', 'gitignore', 'htaccess']);
+}
+
 // =============================================================================
 // REQUEST HANDLERS
 // =============================================================================
@@ -269,6 +297,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
 
     // Rate limiting & upload settings
     $config['MAX_UPLOAD_SIZE'] = $_POST['max_upload_size'] ?? $config['MAX_UPLOAD_SIZE'];
+    $config['CHUNK_SIZE_MB'] = $_POST['chunk_size_mb'] ?? $config['CHUNK_SIZE_MB'];
     $config['RATE_LIMIT_UPLOADS'] = $_POST['rate_limit_uploads'] ?? $config['RATE_LIMIT_UPLOADS'];
     $config['RATE_LIMIT_COMMENTS'] = $_POST['rate_limit_comments'] ?? $config['RATE_LIMIT_COMMENTS'];
     $config['ENABLE_DOWNLOAD_LOG'] = isset($_POST['enable_download_log']) ? 'true' : 'false';
@@ -364,11 +393,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     if (verifyCSRF() && isset($_POST['file'])) {
         $filePath = sanitizePath($_POST['file']);
         if ($filePath && $filePath !== BASE_DIR) {
-            if (is_dir($filePath) ? @rmdir($filePath) : @unlink($filePath)) {
+            if (recursiveDelete($filePath)) {
                 $message = 'Deleted!';
                 $messageType = 'success';
             } else {
-                $message = 'Failed to delete (folder may not be empty)!';
+                $message = 'Failed to delete!';
                 $messageType = 'danger';
             }
         }
@@ -411,7 +440,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_
     foreach ($files as $file) {
         $path = realpath(BASE_DIR . DIRECTORY_SEPARATOR . $file);
         if ($path && strpos($path, BASE_DIR) === 0 && $path !== BASE_DIR) {
-            if (is_dir($path) ? @rmdir($path) : @unlink($path))
+            if (recursiveDelete($path))
                 $deleted++;
         }
     }
@@ -437,6 +466,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_
         }
         $message = "Moved {$moved} item(s)!";
         $messageType = 'success';
+    }
+}
+
+// Handle Get File Content
+if (($_GET['action'] ?? '') === 'get_content' && isAuthenticated()) {
+    $filePath = sanitizePath($_GET['file'] ?? '');
+    if ($filePath && is_file($filePath)) {
+        header('Content-Type: application/json');
+        echo json_encode([
+            'status' => 'success',
+            'content' => file_get_contents($filePath),
+            'name' => basename($filePath)
+        ]);
+        exit;
+    }
+    header('Content-Type: application/json');
+    echo json_encode(['status' => 'error', 'message' => 'File not found']);
+    exit;
+}
+
+// Handle Save File Content
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_file' && isAuthenticated()) {
+    if (verifyCSRF()) {
+        $filePath = sanitizePath($_POST['file'] ?? '');
+        $content = $_POST['content'] ?? '';
+        if ($filePath && is_file($filePath)) {
+            if (file_put_contents($filePath, $content) !== false) {
+                $message = 'File saved!';
+                $messageType = 'success';
+            } else {
+                $message = 'Failed to save file!';
+                $messageType = 'danger';
+            }
+        }
     }
 }
 
@@ -710,6 +773,12 @@ $comments = isAuthenticated() ? getComments() : [];
                                                    value="<?= htmlspecialchars($config['MAX_UPLOAD_SIZE']) ?>" min="0">
                                             <small class="text-muted">Set to 0 for unlimited</small>
                                         </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Chunk Size (MB)</label>
+                                            <input type="number" name="chunk_size_mb" class="form-control" 
+                                                   value="<?= htmlspecialchars($config['CHUNK_SIZE_MB']) ?>" min="1" max="50">
+                                            <small class="text-muted">Size of chunks for large file uploads (1-50 MB)</small>
+                                        </div>
                                         <div class="row">
                                             <div class="col-6 mb-3">
                                                 <label class="form-label">Upload Limit/Hr</label>
@@ -833,6 +902,12 @@ $comments = isAuthenticated() ? getComments() : [];
                                                         class="btn btn-sm btn-outline-secondary">
                                                         <i class="bi bi-download"></i>
                                                     </a>
+                                                <?php endif; ?>
+                                                <?php if (!$item['isDir'] && isEditable($item['name'])): ?>
+                                                    <button class="btn btn-sm btn-outline-primary"
+                                                        onclick="showEdit('<?= htmlspecialchars(addslashes($item['path'])) ?>', '<?= htmlspecialchars(addslashes($item['name'])) ?>')">
+                                                        <i class="bi bi-file-text"></i>
+                                                    </button>
                                                 <?php endif; ?>
                                                 <?php if ($item['name'] !== '..'): ?>
                                                     <button class="btn btn-sm btn-outline-secondary"
@@ -1255,6 +1330,32 @@ $comments = isAuthenticated() ? getComments() : [];
         </div>
     </div>
 
+    <!-- Edit Modal -->
+    <div class="modal fade" id="editModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-file-text me-2"></i>Edit File: <span id="editFileNameDisplay" class="fw-bold"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <form id="editForm" method="POST">
+                        <input type="hidden" name="action" value="save_file">
+                        <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+                        <input type="hidden" name="file" id="editFile">
+                        <textarea name="content" id="editContent" class="form-control border-0 rounded-0" style="height: 70vh; font-family: monospace; font-size: 14px; resize: none;"></textarea>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" onclick="document.getElementById('editForm').submit()">
+                        <i class="bi bi-save me-1"></i>Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Theme Toggle
@@ -1293,6 +1394,30 @@ $comments = isAuthenticated() ? getComments() : [];
             document.getElementById('bulkAction').value = 'bulk_move';
             document.getElementById('targetDir').value = document.getElementById('moveTarget').value;
             document.getElementById('bulkForm').submit();
+        }
+
+        // Edit File
+        function showEdit(path, name) {
+            const modal = new bootstrap.Modal(document.getElementById('editModal'));
+            document.getElementById('editFileNameDisplay').textContent = name;
+            document.getElementById('editFile').value = path;
+            document.getElementById('editContent').value = 'Loading...';
+            modal.show();
+
+            fetch(`?action=get_content&file=${encodeURIComponent(path)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if(data.status === 'success') {
+                        document.getElementById('editContent').value = data.content;
+                    } else {
+                        alert('Error loading file: ' + data.message);
+                        modal.hide();
+                    }
+                })
+                .catch(err => {
+                    alert('Request failed');
+                    modal.hide();
+                });
         }
 
         // Load saved theme on page load

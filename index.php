@@ -1206,11 +1206,57 @@ if (file_exists($readmeFile)) {
                 dropZone.addEventListener('dragleave', () => {
                     dropZone.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
                 });
-                dropZone.addEventListener('drop', (e) => {
+                dropZone.addEventListener('drop', async (e) => {
                     e.preventDefault();
                     dropZone.classList.remove('border-primary', 'bg-primary', 'bg-opacity-10');
-                    if (e.dataTransfer.files.length) handleFiles(Array.from(e.dataTransfer.files));
+                    
+                    // Use DataTransferItemList for folder support
+                    const items = e.dataTransfer.items;
+                    if (items && items.length) {
+                        const files = await getAllFilesFromDrop(items);
+                        if (files.length) handleFiles(files);
+                    }
                 });
+
+                // Recursively get all files from dropped items (supports folders)
+                async function getAllFilesFromDrop(items) {
+                    const files = [];
+                    
+                    async function traverseEntry(entry, path = '') {
+                        if (entry.isFile) {
+                            return new Promise(resolve => {
+                                entry.file(file => {
+                                    // Create a new file object with the relative path
+                                    Object.defineProperty(file, 'webkitRelativePath', {
+                                        value: path + file.name,
+                                        writable: false
+                                    });
+                                    files.push(file);
+                                    resolve();
+                                });
+                            });
+                        } else if (entry.isDirectory) {
+                            const reader = entry.createReader();
+                            return new Promise(resolve => {
+                                reader.readEntries(async entries => {
+                                    for (const subEntry of entries) {
+                                        await traverseEntry(subEntry, path + entry.name + '/');
+                                    }
+                                    resolve();
+                                });
+                            });
+                        }
+                    }
+                    
+                    for (let i = 0; i < items.length; i++) {
+                        const entry = items[i].webkitGetAsEntry();
+                        if (entry) {
+                            await traverseEntry(entry);
+                        }
+                    }
+                    
+                    return files;
+                }
 
                 // File/folder input events
                 fileInput.addEventListener('change', () => {

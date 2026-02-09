@@ -22,6 +22,11 @@ if (empty($sessionPath) || !is_writable($sessionPath)) {
     }
 }
 
+// Session garbage collection - cleanup after 48 hours (172800 seconds)
+ini_set('session.gc_maxlifetime', 172800);
+ini_set('session.gc_probability', 1);
+ini_set('session.gc_divisor', 100);
+
 session_start();
 
 // Disable caching for dynamic content (required for LiteSpeed servers)

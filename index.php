@@ -162,7 +162,9 @@ function logDownload(string $file): void
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     $time = date('Y-m-d H:i:s');
     $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-    $log = "[{$time}] IP: {$ip} | File: {$file} | UA: {$userAgent}\n";
+    // Sanitize file name to prevent log injection (strip newlines and delimiter)
+    $safeFile = str_replace(["\n", "\r", "|"], '', $file);
+    $log = "[{$time}] IP: {$ip} | File: {$safeFile} | UA: {$userAgent}\n";
 
     file_put_contents(DOWNLOAD_LOG_FILE, $log, FILE_APPEND | LOCK_EX);
 }
@@ -216,6 +218,8 @@ class Parsedown
             return "<h{$level} class='text-info fw-bold mt-3 mb-2'>" . htmlspecialchars($m[2]) . "</h{$level}>";
         }
 
+        // Escape any HTML in the line to prevent XSS before applying inline formatting
+        $line = htmlspecialchars($line, ENT_QUOTES, 'UTF-8');
         // Inline formatting
         $line = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $line);
         $line = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $line);
@@ -573,6 +577,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chunk
     }
 
     $fileName = $_POST['fileName'] ?? '';
+    // Normalize path separators and remove traversal segments
+    $fileName = str_replace(['\\', '/'], DIRECTORY_SEPARATOR, $fileName);
+    $segments = array_filter(explode(DIRECTORY_SEPARATOR, $fileName), function ($seg) {
+        return $seg !== '' && $seg !== '.' && $seg !== '..';
+    });
+    $fileName = implode(DIRECTORY_SEPARATOR, $segments);
     $chunkIndex = (int) ($_POST['chunkIndex'] ?? 0);
     $totalChunks = (int) ($_POST['totalChunks'] ?? 1);
     $uploadDir = isset($_POST['dir']) ? sanitizePath($_POST['dir']) : BASE_DIR;
@@ -925,15 +935,7 @@ if (file_exists($readmeFile)) {
 
                 <!-- Upload Form (Admin only) -->
                 <?php if (isAuthenticated() && SHOW_UPLOAD): ?>
-                    <!-- Original Quick Upload -->
-                    <form method="POST" enctype="multipart/form-data" class="d-flex gap-2">
-                        <input type="hidden" name="action" value="upload">
-                        <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-                        <input type="hidden" name="dir" value="<?= htmlspecialchars($relativePath) ?>">
-                        <input type="file" name="file" required class="form-control form-control-sm"
-                            style="max-width: 200px;">
-                        <button type="submit" class="btn btn-sm btn-info"><i class="bi bi-upload"></i></button>
-                    </form>
+                        <!-- Quick upload removed. Use the 'Upload Large File' button for all uploads. -->
 
                     <!-- Pretty Upload Button -->
                     <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal"
@@ -991,9 +993,9 @@ if (file_exists($readmeFile)) {
                                             </a>
                                         <?php endif; ?>
                                         <?php if (!$item['isDir'] && $item['name'] !== '..' && SHOW_DOWNLOAD): ?>
-                                            <a href="?action=download&file=<?= safeUrlEncode($item['path']) ?>"
+                                            <a href="uploads/<?= htmlspecialchars(safeUrlEncode($item['path'])) ?>" download
                                                 class="btn btn-sm btn-outline-secondary">
-                                                Download
+                                                <i class="bi bi-download"></i> Download
                                             </a>
                                         <?php endif; ?>
                                         <?php if (isAuthenticated() && $item['name'] !== '..'): ?>

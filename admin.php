@@ -835,12 +835,12 @@ $comments = isAuthenticated() ? getComments() : [];
                                 <thead><tr><th>Check</th><th>Status</th><th>Message</th></tr></thead>
                                 <tbody>
                                     <?php $phpOk = version_compare(PHP_VERSION, '8.0.0', '>='); ?>
-                                    <tr><td>PHP >= 8.0</td><td><?= $phpOk ? '' : '' ?></td><td class="small" style="color:var(--mu)"><?= $phpOk ? 'Current: '.PHP_VERSION : 'Update PHP to 8.0+' ?></td></tr>
+                                    <tr><td>PHP >= 8.0</td><td><?= $phpOk ? '<span class="text-success">'.getIconSvg('check').'</span>' : '<span class="text-danger">'.getIconSvg('x').'</span>' ?></td><td class="small" style="color:var(--mu)"><?= $phpOk ? 'Current: '.PHP_VERSION : 'Update PHP to 8.0+' ?></td></tr>
                                     <?php foreach (['json','mbstring','fileinfo','gd'] as $ext): $ok = extension_loaded($ext); ?>
-                                    <tr><td><?= $ext ?></td><td><?= $ok ? '' : '' ?></td><td class="small" style="color:var(--mu)"><?= $ok ? 'Installed' : 'Install '.$ext ?></td></tr>
+                                    <tr><td><?= $ext ?></td><td><?= $ok ? '<span class="text-success">'.getIconSvg('check').'</span>' : '<span class="text-danger">'.getIconSvg('x').'</span>' ?></td><td class="small" style="color:var(--mu)"><?= $ok ? 'Installed' : 'Install '.$ext ?></td></tr>
                                     <?php endforeach; ?>
                                     <?php foreach (['Uploads Dir'=>BASE_DIR,'Config File'=>__DIR__.'/.env','Comments'=>COMMENTS_FILE,'Rate Limits'=>RATE_LIMIT_FILE,'Download Log'=>DOWNLOAD_LOG_FILE] as $n=>$p): $e=file_exists($p);$w=is_writable($e?$p:dirname($p)); ?>
-                                    <tr><td><?= $n ?></td><td><?= $w ? '' : '' ?></td><td class="small" style="color:var(--mu)"><?= $w?'Writable':'Check permissions' ?></td></tr>
+                                    <tr><td><?= $n ?></td><td><?= $w ? '<span class="text-success">'.getIconSvg('check').'</span>' : '<span class="text-danger">'.getIconSvg('x').'</span>' ?></td><td class="small" style="color:var(--mu)"><?= $w?'Writable':'Check permissions' ?></td></tr>
                                     <?php endforeach; ?>
                                 </tbody>
                             </table>

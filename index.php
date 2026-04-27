@@ -702,35 +702,51 @@ if (file_exists($readmeFile)) {
         <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-cloud-arrow-up me-2"></i>Upload Files</h5>
+                    <h5 class="modal-title"><?= getIconSvg('upload') ?> Upload Files</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
+                    <!-- Drop Zone -->
                     <div id="uploadDropZone" class="dropzone" onclick="document.getElementById('prettyFileInput').click()">
-                        <i class="bi bi-cloud-upload"></i>
-                        <p style="color:var(--muted);margin:0 0 .75rem">Drag & drop files/folders here or click to browse</p>
+                        <?= getIconSvg('upload', 32) ?>
+                        <p style="color:var(--muted);margin:0.75rem 0">Drag & drop files or folders here, or click to browse</p>
                         <div class="d-flex gap-2 justify-content-center flex-wrap">
                             <input type="file" id="prettyFileInput" class="d-none" multiple>
                             <input type="file" id="prettyFolderInput" class="d-none" webkitdirectory>
-                            <button type="button" class="btn-ghost" id="btnSelectFiles" onclick="event.stopPropagation();document.getElementById('prettyFileInput').click()">
-                                <i class="bi bi-files me-1"></i>Files
+                            <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+                            <button type="button" class="btn-ghost" onclick="event.stopPropagation();document.getElementById('prettyFileInput').click()">
+                                <?= getIconSvg('file') ?> Files
                             </button>
-                            <button type="button" class="btn-ghost" id="btnSelectFolder" onclick="event.stopPropagation();document.getElementById('prettyFolderInput').click()">
-                                <i class="bi bi-folder me-1"></i>Folder
+                            <button type="button" class="btn-ghost" onclick="event.stopPropagation();document.getElementById('prettyFolderInput').click()">
+                                <?= getIconSvg('folder') ?> Folder
                             </button>
                         </div>
                     </div>
+
+                    <!-- Progress Panel -->
                     <div id="uploadProgress" class="d-none">
+                        <!-- File List with individual progress -->
                         <div id="uploadFilesList" class="mb-3" style="max-height:200px;overflow-y:auto"></div>
+
+                        <!-- Stats Row: Speed | Transferred | ETA -->
+                        <div class="d-flex justify-content-between align-items-center mb-2" style="font-size:.82rem;color:var(--muted)">
+                            <span><?= getIconSvg('upload', 14) ?> <span id="uploadSpeed">—</span></span>
+                            <span id="uploadTransferred">0 B / 0 B</span>
+                            <span>ETA: <span id="uploadEta">—</span></span>
+                        </div>
+
+                        <!-- Overall bar -->
                         <div class="d-flex justify-content-between mb-1">
                             <span id="uploadOverallStatus">Uploading...</span>
-                            <span id="uploadPercent">0%</span>
+                            <span id="uploadPercent" class="fw-bold">0%</span>
                         </div>
                         <div class="progress" style="height:22px;border-radius:11px;overflow:hidden">
                             <div id="uploadProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
-                                 style="width:0%;background:linear-gradient(135deg,#FF9D00,#e06800)"></div>
+                                 style="width:0%;background:linear-gradient(135deg,var(--accent),var(--accent-hover));transition:width 0.15s"></div>
                         </div>
                     </div>
+
+                    <!-- Result -->
                     <div id="uploadResult" class="d-none">
                         <div class="alert mb-0" id="uploadResultAlert"></div>
                     </div>

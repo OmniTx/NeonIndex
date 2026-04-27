@@ -569,13 +569,9 @@ $comments = isAuthenticated() ? getComments() : [];
                             <?php endforeach; ?>
                         </nav>
                     </div>
-                    <form method="POST" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
-                        <input type="hidden" name="action" value="upload">
-                        <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-                        <input type="hidden" name="dir" value="<?= htmlspecialchars($relativeCurrentDir) ?>">
-                        <input type="file" name="file" required class="form-control form-control-sm" style="max-width:170px">
-                        <button type="submit" class="btn-accent btn-sm py-1 px-2">Upload</button>
-                    </form>
+                    <button type="button" class="btn-accent btn-sm py-1 px-2" data-bs-toggle="modal" data-bs-target="#adminUploadModal">
+                        <?= getIconSvg('upload') ?> Upload
+                    </button>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover">
@@ -861,12 +857,66 @@ $comments = isAuthenticated() ? getComments() : [];
     <!-- Edit Modal -->
     <div class="modal fade" id="editModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Edit: <span id="editFileNameDisplay" class="fw-bold text-accent"></span></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-0"><form id="editForm" method="POST"><input type="hidden" name="action" value="save_file"><input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>"><input type="hidden" name="file" id="editFile"><textarea name="content" id="editContent" class="form-control border-0 rounded-0" style="height:65vh;font-family:'Fira Code',monospace;font-size:13px;resize:none"></textarea></form></div><div class="modal-footer"><button type="button" class="btn-ghost" data-bs-dismiss="modal">Close</button><button type="button" class="btn-accent" onclick="document.getElementById('editForm').submit()">Save</button></div></div></div></div>
 
+    <!-- Admin Upload Modal -->
+    <div class="modal fade" id="adminUploadModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><?= getIconSvg('upload') ?> Upload Files</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Drop Zone -->
+                    <div id="uploadDropZone" class="dropzone" onclick="document.getElementById('prettyFileInput').click()">
+                        <?= getIconSvg('upload', 32) ?>
+                        <p style="color:var(--muted);margin:0.75rem 0">Drag & drop files or folders here, or click to browse</p>
+                        <div class="d-flex gap-2 justify-content-center flex-wrap">
+                            <input type="file" id="prettyFileInput" class="d-none" multiple>
+                            <input type="file" id="prettyFolderInput" class="d-none" webkitdirectory>
+                            <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+                            <button type="button" class="btn-ghost" onclick="event.stopPropagation();document.getElementById('prettyFileInput').click()">
+                                <?= getIconSvg('file') ?> Files
+                            </button>
+                            <button type="button" class="btn-ghost" onclick="event.stopPropagation();document.getElementById('prettyFolderInput').click()">
+                                <?= getIconSvg('folder') ?> Folder
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Progress Panel -->
+                    <div id="uploadProgress" class="d-none">
+                        <div id="uploadFilesList" class="mb-3" style="max-height:200px;overflow-y:auto"></div>
+                        <div class="d-flex justify-content-between align-items-center mb-2" style="font-size:.82rem;color:var(--muted)">
+                            <span><?= getIconSvg('upload', 14) ?> <span id="uploadSpeed">—</span></span>
+                            <span id="uploadTransferred">0 B / 0 B</span>
+                            <span>ETA: <span id="uploadEta">—</span></span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="uploadOverallStatus">Uploading...</span>
+                            <span id="uploadPercent" class="fw-bold">0%</span>
+                        </div>
+                        <div class="progress" style="height:22px;border-radius:11px;overflow:hidden">
+                            <div id="uploadProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 style="width:0%;background:linear-gradient(135deg,var(--accent),var(--accent-hover));transition:width 0.15s"></div>
+                        </div>
+                    </div>
+
+                    <!-- Result -->
+                    <div id="uploadResult" class="d-none">
+                        <div class="alert mb-0" id="uploadResultAlert"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-ghost" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="public/js/app.js"></script>
     <script>
-        
         function switchTab(id,el){document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');const t=document.getElementById('tab-'+id);if(t)t.style.display='block';document.querySelectorAll('.sidebar .nav-link, .mob-nav a').forEach(a=>a.classList.remove('active'));document.querySelectorAll('[data-tab="'+id+'"]').forEach(a=>a.classList.add('active'))}
-        function showRename(p,n){document.getElementById('renameFile').value=p;document.getElementById('renameName').value=n;new bootstrap.Modal(document.getElementById('renameModal')).show()}
-        function showDelete(p,n){document.getElementById('deleteFile').value=p;document.getElementById('deleteFileName').textContent=n;new bootstrap.Modal(document.getElementById('deleteModal')).show()}
         function showEdit(p,n){const m=new bootstrap.Modal(document.getElementById('editModal'));document.getElementById('editFileNameDisplay').textContent=n;document.getElementById('editFile').value=p;document.getElementById('editContent').value='Loading...';m.show();fetch('?action=get_content&file='+encodeURIComponent(p)).then(r=>r.json()).then(d=>{if(d.status==='success')document.getElementById('editContent').value=d.content;else{alert('Error: '+d.message);m.hide()}}).catch(()=>{alert('Request failed');m.hide()})}
         function bulkDelete(){const c=document.querySelectorAll('.bulk-cb:checked').length;if(!c)return alert('Select files first');if(!confirm('Delete '+c+' item(s)?'))return;document.getElementById('bulkAction').value='bulk_delete';document.getElementById('bulkForm').submit()}
         function bulkMove(){const c=document.querySelectorAll('.bulk-cb:checked').length;if(!c)return alert('Select files first');document.getElementById('bulkAction').value='bulk_move';document.getElementById('targetDir').value=document.getElementById('moveTarget').value;document.getElementById('bulkForm').submit()}

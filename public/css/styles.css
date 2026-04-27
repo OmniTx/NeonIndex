@@ -366,3 +366,27 @@ a:hover {
 .mob-nav a.active, .mob-nav a:hover {
     color: var(--accent);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   9. UPLOAD PROGRESS
+   ═══════════════════════════════════════════════════════════════════════════ */
+.upload-file-row {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.upload-file-row:last-child {
+    border-bottom: none;
+}
+.upload-file-name {
+    font-size: 0.82rem;
+    word-break: break-all;
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.upload-file-size {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}

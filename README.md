@@ -1,4 +1,4 @@
-# NeonIndex v2.0
+# NeonIndex v2.1
 
 > **The Ultimate PHP Directory Lister** — Now with Auto-Updates, Low-End Server Support, and Apple-Inspired Design
 
@@ -65,13 +65,13 @@ ADMIN_PASSWORD=your_secure_password_here
 
 # Site Customization
 SITE_TITLE=My File Server
-DEFAULT_THEME=auto  # Options: auto, light, dark
+DEFAULT_THEME=auto # Options: auto, light, dark
 
 # File Management
-README_POSITION=bottom  # Options: top, bottom
+README_POSITION=bottom # Options: top, bottom
 HIDDEN_FILES=.env,admin.php,.git
 SHOW_COMMENTS=true
-MAX_UPLOAD_SIZE=0  # 0 = unlimited (uses server's upload_max_filesize)
+MAX_UPLOAD_SIZE=0 # 0 = unlimited (uses server's upload_max_filesize)
 
 # Rate Limiting (prevent abuse)
 RATE_LIMIT_UPLOADS=50
@@ -84,7 +84,7 @@ Ensure these directories are writable:
 
 ```bash
 chmod 755 uploads/ backups/ temp/
-chown -R www-data:www-data uploads/ backups/ temp/  # Adjust user as needed
+chown -R www-data:www-data uploads/ backups/ temp/ # Adjust user as needed
 ```
 
 #### 4. Access Your Site
@@ -158,31 +158,31 @@ Automatically activates on servers with:
 If your server returns 500 errors during uploads/downloads:
 
 1. **Enable Debug Mode** (temporarily):
-   ```ini
-   # In .env
-   DEBUG_MODE=true
-   ```
+ ```ini
+ # In .env
+ DEBUG_MODE=true
+ ```
 
 2. **Check Server Logs**:
-   ```bash
-   tail -f /var/log/apache2/error.log  # Apache
-   tail -f /var/log/nginx/error.log    # Nginx
-   ```
+ ```bash
+ tail -f /var/log/apache2/error.log # Apache
+ tail -f /var/log/nginx/error.log # Nginx
+ ```
 
 3. **Adjust Chunk Size** (if needed):
-   ```php
-   // In src/ChunkedUploadService.php
-   private int $chunkSize = 1 * 1024 * 1024; // Reduce to 1MB
-   ```
+ ```php
+ // In src/ChunkedUploadService.php
+ private int $chunkSize = 1 * 1024 * 1024; // Reduce to 1MB
+ ```
 
 4. **Increase PHP Limits** (if possible):
-   ```ini
-   ; In php.ini or .htaccess
-   max_execution_time = 300
-   memory_limit = 512M
-   post_max_size = 1024M
-   upload_max_filesize = 1024M
-   ```
+ ```ini
+ ; In php.ini or .htaccess
+ max_execution_time = 300
+ memory_limit = 512M
+ post_max_size = 1024M
+ upload_max_filesize = 1024M
+ ```
 
 The system automatically retries failed chunks and resumes exactly where it left off.
 
@@ -237,37 +237,36 @@ Click the **🌙/☀️ icon** in the navbar to switch themes manually. Theme pr
 
 ```
 NeonIndex/
-├── bootstrap.php              # App initialization & autoloader
-├── index.php                  # Main directory browser
-├── admin.php                  # Admin management panel
-├── .env                       # Configuration (DO NOT COMMIT)
-├── .env.example               # Configuration template
-├── VERSION                    # Current version number
-├── favicon.svg                # Site favicon
+├── bootstrap.php # App initialization & autoloader
+├── index.php # Main directory browser
+├── admin.php # Admin management panel
+├── .env # Configuration (DO NOT COMMIT)
+├── .env.example # Configuration template
+├── VERSION # Current version number
+├── favicon.svg # Site favicon
 │
-├── src/                       # Core Services
-│   ├── ConfigManager.php      # Configuration singleton
-│   ├── UpdateService.php      # GitHub auto-updater
-│   ├── ChunkedUploadService.php # Chunked upload/download
-│   ├── FileSystem.php         # File utilities
-│   ├── MarkdownParser.php     # Markdown rendering
-│   ├── CommentService.php     # Comment management
-│   ├── RateLimiter.php        # Rate limiting
-│   └── UploadService.php      # Legacy upload handler
+├── src/ # Core Services
+│ ├── ConfigManager.php # Configuration singleton
+│ ├── UpdateService.php # GitHub auto-updater
+│ ├── UploadService.php # Upload handler (chunked + simple)
+│ ├── FileSystem.php # File utilities
+│ ├── MarkdownParser.php # Markdown rendering
+│ ├── CommentService.php # Comment management
+│ └── RateLimiter.php # Rate limiting
 │
-├── public/                    # Frontend Assets
-│   ├── css/
-│   │   └── styles.css         # Apple-inspired styles
-│   └── js/
-│       └── app.js             # ES6+ frontend logic
+├── public/ # Frontend Assets
+│ ├── css/
+│ │ └── styles.css # Apple-inspired styles
+│ └── js/
+│ └── app.js # ES6+ frontend logic
 │
-├── uploads/                   # User files (publicly listed)
-│   └── README.md              # Optional directory readme
+├── uploads/ # User files (publicly listed)
+│ └── README.md # Optional directory readme
 │
-├── backups/                   # Auto-update backups
-├── temp/                      # Temporary update files
-├── comments.json              # Visitor comments (auto-generated)
-└── rate_limits.json           # Rate limit data (auto-generated)
+├── backups/ # Auto-update backups
+├── temp/ # Temporary update files
+├── comments.json # Visitor comments (auto-generated)
+└── rate_limits.json # Rate limit data (auto-generated)
 ```
 
 ---
@@ -306,7 +305,7 @@ private int $chunkSize = 1 * 1024 * 1024; // 1MB instead of 2MB
 #### Auto-Update Fails
 **Solution:** Ensure ZipArchive extension is enabled:
 ```bash
-php -m | grep zip  # Should output: zip
+php -m | grep zip # Should output: zip
 ```
 If missing: `apt-get install php-zip` or contact hosting provider.
 
@@ -423,3 +422,4 @@ copies or substantial portions of the Software.
 [Report Bug](https://github.com/OmniTx/NeonIndex/issues) · [Request Feature](https://github.com/OmniTx/NeonIndex/issues) · [View Demo](#)
 
 </div>
+

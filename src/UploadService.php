@@ -2,10 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NeonIndex\Services;
-
-use NeonIndex\Security\RateLimiter;
-use ZipArchive;
+namespace NeonIndex\Service;
 
 /**
  * Upload Service for NeonIndex
@@ -191,15 +188,15 @@ class UploadService
      */
     public function downloadFolderAsZip(string $folderPath): ?string
     {
-        if (!class_exists(ZipArchive::class)) {
+        if (!class_exists(\ZipArchive::class)) {
             return null;
         }
 
         $zipName = basename($folderPath) . '.zip';
         $tempZip = tempnam(sys_get_temp_dir(), 'zip_');
 
-        $zip = new ZipArchive();
-        if ($zip->open($tempZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+        $zip = new \ZipArchive();
+        if ($zip->open($tempZip, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
             return null;
         }
 

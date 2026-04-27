@@ -1,0 +1,58 @@
+name: Release CI
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read Version
+        id: get_version
+        run: |
+          # Read version from VERSION file and trim whitespace
+          VERSION=$(cat VERSION | xargs)
+          echo "version=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if Tag Exists
+        id: check_tag
+        run: |
+          if git rev-parse "${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.get_version.outputs.version }} already exists. Skipping release."
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag ${{ steps.get_version.outputs.version }} does not exist. Proceeding with release."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package Release ZIP
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          zip -r NeonIndex-${{ steps.get_version.outputs.version }}.zip . \
+            -x "*.git*" \
+            -x "*.github*" \
+            -x "*.vscode*" \
+            -x "sessions/*" \
+            -x "uploads/*" \
+            -x ".env"
+            
+      - name: Create GitHub Release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          files: NeonIndex-${{ steps.get_version.outputs.version }}.zip
+          generate_release_notes: true

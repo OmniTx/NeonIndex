@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NeonIndex\Config;
+namespace NeonIndex\Service;
 
 /**
  * Configuration Manager for NeonIndex
@@ -16,7 +16,7 @@ class ConfigManager
 
     private function __construct()
     {
-        $this->envPath = dirname(__DIR__, 2) . '/.env';
+        $this->envPath = dirname(__DIR__) . '/.env';
         $this->load();
     }
 

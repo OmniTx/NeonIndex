@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NeonIndex\Markdown;
+namespace NeonIndex\Service;
 
 /**
  * Minimal Markdown Parser for NeonIndex

@@ -2,10 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NeonIndex\Services;
-
-use NeonIndex\Security\RateLimiter;
-use ZipArchive;
+namespace NeonIndex\Service;
 
 /**
  * Upload Service for NeonIndex

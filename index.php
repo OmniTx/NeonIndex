@@ -478,7 +478,7 @@ if (file_exists($readmeFile)) {
         <?php if (README_POSITION === 'top' && $readmeContent !== ''): ?>
             <div class="card mb-4">
                 <div class="card-header">
-                    <i class="bi bi-file-text text-accent me-2"></i>README.md
+                    <span class="text-accent"><?= getIconSvg('file') ?></span> README.md
                 </div>
                 <div class="card-body"><?= $readmeContent ?></div>
             </div>
@@ -586,7 +586,7 @@ if (file_exists($readmeFile)) {
         <?php if (README_POSITION === 'bottom' && $readmeContent !== ''): ?>
             <div class="card mt-4">
                 <div class="card-header">
-                    <i class="bi bi-file-text text-accent me-2"></i>README.md
+                    <span class="text-accent"><?= getIconSvg('file') ?></span> README.md
                 </div>
                 <div class="card-body"><?= $readmeContent ?></div>
             </div>
@@ -596,7 +596,7 @@ if (file_exists($readmeFile)) {
         <?php if (SHOW_COMMENTS && !isAuthenticated()): ?>
             <div class="card mt-4">
                 <div class="card-header">
-                    <i class="bi bi-chat-dots text-accent me-2"></i>Leave a Comment
+                    <span class="text-accent"><?= getIconSvg('message') ?></span> Leave a Comment
                 </div>
                 <div class="card-body">
                     <form method="POST">

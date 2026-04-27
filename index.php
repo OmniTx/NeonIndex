@@ -418,6 +418,7 @@ if (file_exists($readmeFile)) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars(SITE_TITLE) ?></title>
+    <script src="public/js/theme.js"></script>
     <meta name="description" content="<?= htmlspecialchars(SITE_TITLE) ?> - A modern file directory browser.">
     <meta name="keywords" content="file browser, directory listing, file manager">
     <meta name="author" content="OmniTx">
@@ -439,25 +440,25 @@ if (file_exists($readmeFile)) {
     <div class="topbar">
         <div class="container d-flex align-items-center justify-content-between">
             <a class="brand" href="index.php">
-                <i class="bi bi-folder-fill"></i>
+                <?= getIconSvg('folder') ?>
                 <span class="glow"><?= htmlspecialchars(SITE_TITLE) ?></span>
             </a>
             <div class="d-flex align-items-center gap-2">
                 <?php if (SHOW_THEME_TOGGLE): ?>
                     <button class="btn-ghost" onclick="toggleTheme()" title="Toggle Theme">
-                        <i class="bi bi-circle-half"></i>
+                        <?= getIconSvg('theme') ?>
                     </button>
                 <?php endif; ?>
                 <?php if (isAuthenticated()): ?>
                     <a href="admin.php" class="btn-ghost">
-                        <i class="bi bi-gear me-1"></i><span>Admin</span>
+                        <?= getIconSvg('settings') ?><span>Admin</span>
                     </a>
                     <a href="?action=logout" class="btn-ghost text-danger">
-                        <i class="bi bi-box-arrow-right"></i>
+                        <?= getIconSvg('logout') ?>
                     </a>
                 <?php else: ?>
                     <button class="btn-ghost" data-bs-toggle="modal" data-bs-target="#loginModal" title="Admin Login">
-                        <i class="bi bi-lock"></i>
+                        <?= getIconSvg('lock') ?>
                     </button>
                 <?php endif; ?>
             </div>
@@ -499,7 +500,7 @@ if (file_exists($readmeFile)) {
                 </nav>
                 <?php if (isAuthenticated() && SHOW_UPLOAD): ?>
                     <button type="button" class="btn-accent btn-sm py-1 px-3" data-bs-toggle="modal" data-bs-target="#prettyUploadModal">
-                        <i class="bi bi-cloud-arrow-up me-1"></i>Upload
+                        <?= getIconSvg('upload') ?>Upload
                     </button>
                 <?php endif; ?>
             </div>
@@ -547,13 +548,13 @@ if (file_exists($readmeFile)) {
                                     <?php if ($item['isDir'] && $item['name'] !== '..' && SHOW_DOWNLOAD): ?>
                                         <a href="?action=download_folder&folder=<?= FileSystem::safeUrlEncode($item['path']) ?>" 
                                            class="btn-ghost py-1 px-2" title="Download ZIP">
-                                            <i class="bi bi-file-zip"></i>
+                                            <?= getIconSvg('bulk') ?>
                                         </a>
                                     <?php endif; ?>
                                     <?php if (!$item['isDir'] && $item['name'] !== '..' && SHOW_DOWNLOAD): ?>
                                         <a href="uploads/<?= htmlspecialchars(FileSystem::safeUrlEncode($item['path'])) ?>" 
                                            download class="btn-ghost py-1 px-2">
-                                            <i class="bi bi-download me-1"></i><span>Download</span>
+                                            <?= getIconSvg('download') ?><span>Download</span>
                                         </a>
                                     <?php endif; ?>
                                     <?php if (isAuthenticated() && $item['name'] !== '..'): ?>
@@ -561,14 +562,14 @@ if (file_exists($readmeFile)) {
                                             <button class="btn-ghost py-1 px-2" 
                                                     onclick="showRename('<?= htmlspecialchars(addslashes($item['path'])) ?>','<?= htmlspecialchars(addslashes($item['name'])) ?>')" 
                                                     title="Rename">
-                                                <i class="bi bi-pencil"></i>
+                                                <?= getIconSvg('edit') ?>
                                             </button>
                                         <?php endif; ?>
                                         <?php if (SHOW_DELETE): ?>
                                             <button class="btn-ghost py-1 px-2 text-danger" 
                                                     onclick="showDelete('<?= htmlspecialchars(addslashes($item['path'])) ?>','<?= htmlspecialchars(addslashes($item['name'])) ?>')" 
                                                     title="Delete">
-                                                <i class="bi bi-trash3"></i>
+                                                <?= getIconSvg('trash') ?>
                                             </button>
                                         <?php endif; ?>
                                     <?php endif; ?>
@@ -616,7 +617,7 @@ if (file_exists($readmeFile)) {
                             <textarea name="comment_message" class="form-control" rows="4" placeholder="Write your comment here..." required></textarea>
                         </div>
                         <button type="submit" class="btn-accent mt-3">
-                            <i class="bi bi-send me-1"></i>Submit
+                            <?= getIconSvg('message') ?>Submit
                         </button>
                     </form>
                 </div>

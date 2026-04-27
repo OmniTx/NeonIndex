@@ -35,6 +35,7 @@ htmlcov/
 .idea/
 *.swp
 *.swo
+sessions/
 
 # System files
 .DS_Store

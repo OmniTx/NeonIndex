@@ -16,12 +16,12 @@ declare(strict_types=1);
 // Bootstrap the application
 require_once __DIR__ . '/bootstrap.php';
 
-use NeonIndex\Config\ConfigManager;
-use NeonIndex\Security\RateLimiter;
-use NeonIndex\Markdown\MarkdownParser;
-use NeonIndex\Services\CommentService;
-use NeonIndex\Services\UploadService;
-use NeonIndex\Utils\FileSystem;
+use NeonIndex\Service\ConfigManager;
+use NeonIndex\Service\RateLimiter;
+use NeonIndex\Service\MarkdownParser;
+use NeonIndex\Service\CommentService;
+use NeonIndex\Service\UploadService;
+use NeonIndex\Service\FileSystem;
 
 // Initialize configuration
 $config = ConfigManager::getInstance();

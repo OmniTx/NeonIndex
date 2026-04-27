@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NeonIndex\Security;
+namespace NeonIndex\Service;
 
 /**
  * Rate Limiter for NeonIndex

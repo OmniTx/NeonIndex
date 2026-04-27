@@ -7,16 +7,16 @@ declare(strict_types=1);
  * Autoloader and application initialization
  */
 
-// Define base path
-define('NEONINDEX_ROOT', dirname(__DIR__));
+// Define base path - Use __DIR__ directly since bootstrap.php is in root
+define('NEONINDEX_ROOT', __DIR__);
 
-// Autoloader
+// Autoloader - Flat structure (all classes in NeonIndex\Service namespace are in src/ root)
 spl_autoload_register(function (string $class): void {
     // Project namespace prefix
-    $prefix = 'NeonIndex\\';
+    $prefix = 'NeonIndex\\Service\\';
     
     // Base directory for the namespace prefix
-    $baseDir = NEONINDEX_ROOT . '/src/';
+    $baseDir = NEONINDEX_ROOT . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR;
     
     // Does the class use the namespace prefix?
     $len = strlen($prefix);
@@ -24,11 +24,11 @@ spl_autoload_register(function (string $class): void {
         return;
     }
     
-    // Get the relative class name
+    // Get the relative class name (just the class name, no subdirectories)
     $relativeClass = substr($class, $len);
     
-    // Replace namespace separators with directory separators
-    $file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
+    // Build file path (all classes are directly in src/)
+    $file = $baseDir . $relativeClass . '.php';
     
     // If the file exists, require it
     if (file_exists($file)) {

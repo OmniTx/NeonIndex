@@ -2,11 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NeonIndex\Services;
-
-use NeonIndex\Config\ConfigManager;
-use NeonIndex\Security\RateLimiter;
-use NeonIndex\Utils\FileSystem;
+namespace NeonIndex\Service;
 
 /**
  * Comment Service for NeonIndex

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NeonIndex\Config;
+namespace NeonIndex\Service;
 
 /**
  * Configuration Manager for NeonIndex

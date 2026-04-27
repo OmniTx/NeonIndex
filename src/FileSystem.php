@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NeonIndex\Utils;
+namespace NeonIndex\Service;
 
 /**
  * File System Utilities for NeonIndex

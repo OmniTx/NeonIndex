@@ -1,0 +1,18 @@
+{
+  "name": "NeonIndex Codespace",
+  "image": "mcr.microsoft.com/devcontainers/php:0-8.3",
+  "postCreateCommand": "composer install --no-interaction",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "bmewburn.vscode-intelephense-client",
+        "felixfbecker.php-debug",
+        "mehedidracula.php-namespace-resolver"
+      ]
+    }
+  },
+  "settings": {
+    "php.validate.executablePath": "/usr/local/bin/php"
+  },
+  "remoteUser": "vscode"
+}

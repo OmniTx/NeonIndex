@@ -21,6 +21,9 @@ class MarkdownParser
         // Normalize line endings
         $text = str_replace(["\r\n", "\r"], "\n", $text);
 
+        // Sanitize script tags to prevent XSS
+        $text = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $text) ?? $text;
+
         // Extract fenced code blocks line-by-line (avoids PCRE backtrack limits)
         $lines = explode("\n", $text);
         $inCodeBlock = false;
@@ -97,6 +100,12 @@ class MarkdownParser
             // Check for code block placeholder
             if (str_starts_with($block, '%%NEONINDEX_CODEBLOCK_') && str_ends_with($block, '%%')) {
                 $htmlBlocks[] = $this->codeBlocks[$block] ?? '';
+                continue;
+            }
+
+            // HTML Blocks (starts with <)
+            if (str_starts_with($block, '<')) {
+                $htmlBlocks[] = $this->parseInline($block);
                 continue;
             }
 
@@ -213,9 +222,6 @@ class MarkdownParser
 
     private function parseInline(string $text): string
     {
-        // Escape HTML first
-        $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
-
         // Leave inline code placeholders unchanged (they are alphanumeric and survive htmlspecialchars)
         // We restore them in the final step of the parent parse() method.
 

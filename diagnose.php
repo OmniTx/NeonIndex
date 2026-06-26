@@ -44,6 +44,26 @@ if ($opcacheEnabled) {
     echo "opcache_reset() result: " . ($reset ? 'Success' : 'Failed') . "\n";
 }
 
+// Path Resolution and File Reading Test
+$baseDir = realpath(__DIR__ . '/uploads') ?: __DIR__ . '/uploads';
+echo "\n=== PATH RESOLUTION TEST ===\n";
+echo "BASE_DIR: " . $baseDir . "\n";
+$targetFile = 'README.md';
+$realPath = realpath($baseDir . DIRECTORY_SEPARATOR . $targetFile);
+echo "Expected full path: " . $baseDir . DIRECTORY_SEPARATOR . $targetFile . "\n";
+echo "Resolved realpath: " . ($realPath ?: 'FALSE (File not found or unreadable)') . "\n";
+if ($realPath !== false) {
+    $starts = str_starts_with($realPath, $baseDir);
+    echo "Path starts with BASE_DIR: " . ($starts ? 'Yes' : 'No') . "\n";
+    $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+    echo "Extension detected: " . $ext . "\n";
+    echo "Is extension md: " . ($ext === 'md' ? 'Yes' : 'No') . "\n";
+    
+    // Test read file content
+    $fileContent = @file_get_contents($realPath);
+    echo "File content read: " . ($fileContent !== false ? 'Success (' . strlen($fileContent) . ' bytes)' : 'Failed') . "\n";
+}
+
 // Test Markdown Parser
 require_once __DIR__ . '/bootstrap.php';
 if (class_exists('NeonIndex\Service\MarkdownParser')) {
@@ -53,6 +73,13 @@ if (class_exists('NeonIndex\Service\MarkdownParser')) {
     echo "\n=== PARSER TEST OUTPUT ===\n";
     echo $html . "\n";
     echo "==========================\n";
+    
+    if (isset($fileContent) && $fileContent !== false) {
+        $parsedReadme = $parser->parse($fileContent);
+        echo "\n=== ACTUAL UPLOADS/README.MD PARSER TEST (FIRST 300 CHARS OF HTML) ===\n";
+        echo substr($parsedReadme, 0, 300) . "...\n";
+        echo "===================================================================\n";
+    }
 } else {
     echo "Class NeonIndex\\Service\\MarkdownParser does not exist!\n";
 }

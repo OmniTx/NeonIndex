@@ -9,7 +9,7 @@ declare(strict_types=1);
  * theme switching, README rendering, and visitor comments support.
  * 
  * @author OmniTx
- * @version 2.3.5
+ * @version 2.3.6
  * @license MIT
  */
 

@@ -3,14 +3,14 @@
 declare(strict_types=1);
 
 /**
- * NeonIndex v2.3.2 — Admin Panel
+ * NeonIndex v2.3.3 — Admin Panel
  *
  * Administrative interface for managing files, settings, comments, and logs.
  * Uses shared bootstrap for session/CSRF and delegates to service classes
  * (ConfigManager, CommentService, FileSystem) for core operations.
  *
  * @author  OmniTx
- * @version 2.3.2
+ * @version 2.3.3
  * @license MIT
  */
 

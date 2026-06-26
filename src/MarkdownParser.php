@@ -21,20 +21,58 @@ class MarkdownParser
         // Normalize line endings
         $text = str_replace(["\r\n", "\r"], "\n", $text);
 
-        // Extract fenced code blocks first so they don't get processed
-        $text = preg_replace_callback('/^```(\w*)\s*\n(.*?)\n```\s*$/ms', function ($matches) {
-            $id = "\x00CODEBLOCK_" . count($this->codeBlocks) . "\x00";
-            $lang = $matches[1] ? htmlspecialchars(trim($matches[1]), ENT_QUOTES, 'UTF-8') : '';
-            $code = htmlspecialchars($matches[2], ENT_QUOTES, 'UTF-8');
-            $langAttr = $lang ? " class=\"language-$lang\"" : '';
-            $langLabel = $lang ? "<div style='position:absolute;top:0;right:0;padding:2px 10px;font-size:0.7em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em'>$lang</div>" : '';
-            $this->codeBlocks[$id] = "<div class='position-relative'>{$langLabel}<pre class='p-3 rounded mb-3 overflow-auto' style='background:var(--bg-secondary); border:1px solid var(--border)'><code{$langAttr} style='font-family:\"SF Mono\",SFMono-Regular,ui-monospace,Menlo,Monaco,monospace;font-size:0.85em;white-space:pre'>{$code}</code></pre></div>";
-            return $id;
-        }, $text) ?? $text;
+        // Extract fenced code blocks line-by-line (avoids PCRE backtrack limits)
+        $lines = explode("\n", $text);
+        $inCodeBlock = false;
+        $codeBlockLang = '';
+        $codeBlockLines = [];
+        $newLines = [];
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            if (str_starts_with($trimmed, '```')) {
+                if ($inCodeBlock) {
+                    // End of code block
+                    $id = "%%NEONINDEX_CODEBLOCK_" . count($this->codeBlocks) . "%%";
+                    $lang = htmlspecialchars($codeBlockLang, ENT_QUOTES, 'UTF-8');
+                    $code = htmlspecialchars(implode("\n", $codeBlockLines), ENT_QUOTES, 'UTF-8');
+                    
+                    $langAttr = $lang ? " class=\"language-$lang\"" : '';
+                    $langLabel = $lang ? "<div style='position:absolute;top:0;right:0;padding:2px 10px;font-size:0.7em;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em'>$lang</div>" : '';
+                    
+                    $this->codeBlocks[$id] = "<div class='position-relative'>{$langLabel}<pre class='p-3 rounded mb-3 overflow-auto' style='background:var(--bg-secondary); border:1px solid var(--border)'><code{$langAttr} style='font-family:\"SF Mono\",SFMono-Regular,ui-monospace,Menlo,Monaco,monospace;font-size:0.85em;white-space:pre'>{$code}</code></pre></div>";
+                    
+                    $newLines[] = $id;
+                    $inCodeBlock = false;
+                    $codeBlockLines = [];
+                    $codeBlockLang = '';
+                } else {
+                    // Start of code block
+                    $inCodeBlock = true;
+                    $codeBlockLang = trim(substr($trimmed, 3));
+                }
+            } else {
+                if ($inCodeBlock) {
+                    $codeBlockLines[] = $line;
+                } else {
+                    $newLines[] = $line;
+                }
+            }
+        }
+        
+        // If the code block was not closed, append it
+        if ($inCodeBlock) {
+            $newLines[] = '```' . $codeBlockLang;
+            foreach ($codeBlockLines as $l) {
+                $newLines[] = $l;
+            }
+        }
+        
+        $text = implode("\n", $newLines);
 
         // Also handle inline ``` style without newlines (single-line code fence)
         $text = preg_replace_callback('/```(\w*)\s+(.*?)```/s', function ($matches) {
-            $id = "\x00CODEBLOCK_" . count($this->codeBlocks) . "\x00";
+            $id = "%%NEONINDEX_CODEBLOCK_" . count($this->codeBlocks) . "%%";
             $code = htmlspecialchars($matches[2], ENT_QUOTES, 'UTF-8');
             $this->codeBlocks[$id] = "<pre class='p-3 rounded mb-3 overflow-auto' style='background:var(--bg-secondary); border:1px solid var(--border)'><code style='font-family:\"SF Mono\",SFMono-Regular,ui-monospace,Menlo,Monaco,monospace;font-size:0.85em;white-space:pre'>{$code}</code></pre>";
             return $id;
@@ -42,7 +80,7 @@ class MarkdownParser
 
         // Extract inline code BEFORE block processing so backticks don't interfere
         $text = preg_replace_callback('/`([^`\n]+?)`/', function ($matches) {
-            $id = "\x00ICODE_" . count($this->inlineCodeBlocks) . "\x00";
+            $id = "%%NEONINDEX_ICODE_" . count($this->inlineCodeBlocks) . "%%";
             $code = htmlspecialchars($matches[1], ENT_QUOTES, 'UTF-8');
             $this->inlineCodeBlocks[$id] = "<code class='px-1 py-0 rounded' style='background:var(--bg-tertiary);color:var(--accent);font-family:\"SF Mono\",SFMono-Regular,ui-monospace,monospace;font-size:0.9em'>{$code}</code>";
             return $id;
@@ -57,7 +95,7 @@ class MarkdownParser
             if ($block === '') continue;
 
             // Check for code block placeholder
-            if (preg_match('/^\x00CODEBLOCK_\d+\x00$/', $block)) {
+            if (str_starts_with($block, '%%NEONINDEX_CODEBLOCK_') && str_ends_with($block, '%%')) {
                 $htmlBlocks[] = $this->codeBlocks[$block] ?? '';
                 continue;
             }
@@ -178,9 +216,8 @@ class MarkdownParser
         // Escape HTML first
         $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
 
-        // Restore inline code placeholders (they were already escaped)
-        // They contain \x00 which survives htmlspecialchars
-        // We leave them as placeholders and restore later
+        // Leave inline code placeholders unchanged (they are alphanumeric and survive htmlspecialchars)
+        // We restore them in the final step of the parent parse() method.
 
         // Images: ![alt](url)
         $text = preg_replace(

@@ -9,7 +9,7 @@ declare(strict_types=1);
  * theme switching, README rendering, and visitor comments support.
  * 
  * @author OmniTx
- * @version 2.0.0
+ * @version 2.3.0
  * @license MIT
  */
 
@@ -158,17 +158,32 @@ if (($_GET['action'] ?? '') === 'logout') {
 }
 
 // Handle View (display file in browser)
+$viewingMarkdown = false;
+$markdownContent = '';
+$markdownFileName = '';
+
 if (($_GET['action'] ?? '') === 'view' && isset($_GET['file'])) {
     $filePath = sanitizePath($_GET['file']);
     if ($filePath && is_file($filePath) && !isHiddenFile(basename($filePath))) {
-        $mimeType = FileSystem::getMimeType($filePath);
-        $fileName = basename($filePath);
+        if (strtolower(pathinfo($filePath, PATHINFO_EXTENSION)) === 'md') {
+            $viewingMarkdown = true;
+            $markdownContent = $markdownParser->parse(file_get_contents($filePath));
+            $markdownFileName = basename($filePath);
+            
+            // Set directory for breadcrumbs
+            $relDir = dirname(str_replace(BASE_DIR . DIRECTORY_SEPARATOR, '', $filePath));
+            if ($relDir === '.') $relDir = '';
+            $_GET['dir'] = $relDir;
+        } else {
+            $mimeType = FileSystem::getMimeType($filePath);
+            $fileName = basename($filePath);
 
-        header('Content-Type: ' . $mimeType);
-        header('Content-Disposition: inline; filename="' . $fileName . '"');
-        header('Content-Length: ' . filesize($filePath));
-        readfile($filePath);
-        exit;
+            header('Content-Type: ' . $mimeType);
+            header('Content-Disposition: inline; filename="' . $fileName . '"');
+            header('Content-Length: ' . filesize($filePath));
+            readfile($filePath);
+            exit;
+        }
     }
 }
 
@@ -475,6 +490,32 @@ if (file_exists($readmeFile)) {
         <?php endif; ?>
 
         <!-- README (Top) -->
+        <?php if ($viewingMarkdown): ?>
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <nav aria-label="breadcrumb" class="m-0">
+                        <ol class="breadcrumb m-0">
+                            <?php foreach ($breadcrumbs as $crumb): ?>
+                                <li class="breadcrumb-item">
+                                    <a href="?dir=<?= FileSystem::safeUrlEncode($crumb['path']) ?>">
+                                        <?= htmlspecialchars($crumb['name']) ?>
+                                    </a>
+                                </li>
+                            <?php endforeach; ?>
+                            <li class="breadcrumb-item active" aria-current="page">
+                                <?= htmlspecialchars($markdownFileName) ?>
+                            </li>
+                        </ol>
+                    </nav>
+                    <a href="?dir=<?= FileSystem::safeUrlEncode($_GET['dir'] ?? '') ?>" class="btn-ghost btn-sm">
+                        <?= getIconSvg('folder') ?><span>Back</span>
+                    </a>
+                </div>
+                <div class="card-body">
+                    <?= $markdownContent ?>
+                </div>
+            </div>
+        <?php else: ?>
         <?php if (README_POSITION === 'top' && $readmeContent !== ''): ?>
             <div class="card mb-4">
                 <div class="card-header">
@@ -590,6 +631,7 @@ if (file_exists($readmeFile)) {
                 </div>
                 <div class="card-body"><?= $readmeContent ?></div>
             </div>
+        <?php endif; ?>
         <?php endif; ?>
 
         <!-- Comment Form (Visitors only) -->

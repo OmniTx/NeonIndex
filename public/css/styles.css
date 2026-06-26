@@ -1,5 +1,5 @@
 /**
- * NeonIndex v2.1 — Apple-Inspired Theme System
+ * NeonIndex v2.3 — Apple-Inspired Theme System
  *
  * Clean, minimalistic, and strictly 2 themes (Light & Dark).
  * Uses SF Pro Display / System UI fonts and subtle glassmorphism.
@@ -389,4 +389,42 @@ a:hover {
     font-size: 0.75rem;
     color: var(--text-secondary);
     white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   10. MARKDOWN RENDERING
+   ═══════════════════════════════════════════════════════════════════════════ */
+.card-body h1:first-child,
+.card-body h2:first-child,
+.card-body h3:first-child {
+    margin-top: 0 !important;
+}
+.card-body pre {
+    margin-bottom: 1em;
+}
+.card-body pre code {
+    display: block;
+    line-height: 1.6;
+    tab-size: 4;
+}
+.card-body img {
+    max-width: 100%;
+    height: auto;
+}
+.card-body blockquote {
+    margin: 1em 0;
+}
+.card-body ul, .card-body ol {
+    margin-bottom: 1em;
+}
+.card-body p:last-child {
+    margin-bottom: 0;
+}
+.card-body hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 1.5em 0;
+}
+.card-body table {
+    margin-bottom: 1em;
 }

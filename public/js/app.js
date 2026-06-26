@@ -1,5 +1,5 @@
 /**
- * NeonIndex v2.1 — Frontend JavaScript
+ * NeonIndex v2.3 — Frontend JavaScript
  *
  * Handles:
  *  - Chunked file uploads with drag-and-drop, granular progress, speed & ETA

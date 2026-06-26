@@ -1,4 +1,4 @@
-# NeonIndex v2.1
+# NeonIndex v2.3
 
 > **The Ultimate PHP Directory Lister** — Now with Auto-Updates, Low-End Server Support, and Apple-Inspired Design
 

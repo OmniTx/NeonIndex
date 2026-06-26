@@ -111,6 +111,11 @@ class UpdateService
             $this->deleteDir($tempZip);
             $this->deleteDir($extractPath);
 
+            // 6. Clear OPcache
+            if (function_exists('opcache_reset')) {
+                @opcache_reset();
+            }
+
             return ['success' => true, 'message' => 'Update completed successfully!'];
 
         } catch (Exception $e) {

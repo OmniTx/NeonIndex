@@ -7,6 +7,13 @@ declare(strict_types=1);
  * Autoloader and application initialization
  */
 
+// Clear OPcache if requested manually (helps force reload updated files on shared cPanel hosting)
+if (isset($_GET['clear_cache']) && $_GET['clear_cache'] === '1') {
+    if (function_exists('opcache_reset')) {
+        @opcache_reset();
+    }
+}
+
 // Define base path - Use __DIR__ directly since bootstrap.php is in root
 define('NEONINDEX_ROOT', __DIR__);
 
